@@ -225,6 +225,7 @@ class DiscoveryAnnotationTests(unittest.TestCase):
         self.assertIn("novelty_level", export["leads"][0])
         report = render_safe_leads_report(export)
         self.assertIn("Novelty", report)
+        self.assertIn("representativeness", report.lower())
 
 
 if __name__ == "__main__":

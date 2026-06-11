@@ -285,6 +285,7 @@ def render_safe_leads_report(export: dict[str, Any], *, max_leads: int = 10) -> 
             "",
             "- These leads are benchmark-derived shortlists for review, not recommendations for release or deployment.",
             "- Wet-lab triage should verify biosafety, taxonomy, culturing feasibility, and functional assay design.",
+            "- Novelty = how unlike the training set a candidate is (annotation-feature Jaccard distance); it is a representativeness signal, NOT a confidence or correctness estimate.",
             "",
         ]
     )
