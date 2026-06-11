@@ -73,6 +73,41 @@ class CliTests(unittest.TestCase):
         function_names = {function["name"] for function in prediction["functions"]}
         self.assertIn("cellulose degradation", function_names)
 
+    def test_import_eggnog_command_outputs_annotation_tsv(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "microbial_function_discovery.cli",
+                "import-eggnog",
+                "examples/eggnog_mapper.emapper.annotations",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertIn("protein_id\tdatabase\taccession\tname\tevalue", result.stdout)
+        self.assertIn("p1\tCAZy\tGH5", result.stdout)
+
+    def test_import_domtblout_command_outputs_annotation_tsv(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "microbial_function_discovery.cli",
+                "import-domtblout",
+                "examples/pfam.domtblout",
+                "--database",
+                "Pfam",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertIn("p1\tPfam\tPF00150.20", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

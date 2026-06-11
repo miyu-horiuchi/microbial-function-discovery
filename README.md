@@ -104,6 +104,8 @@ Run the scaffold without installing dependencies:
 ```bash
 PYTHONPATH=src python3 -m microbial_function_discovery.cli panels
 PYTHONPATH=src python3 -m microbial_function_discovery.cli predict examples/useful_functions.faa --genome-id candidate_001
+PYTHONPATH=src python3 -m microbial_function_discovery.cli import-eggnog examples/eggnog_mapper.emapper.annotations
+PYTHONPATH=src python3 -m microbial_function_discovery.cli import-domtblout examples/pfam.domtblout --database Pfam
 PYTHONPATH=src python3 -m microbial_function_discovery.cli predict-annotations examples/annotation_hits.tsv --genome-id candidate_001
 PYTHONPATH=src python3 -m microbial_function_discovery.cli validate examples/prediction.example.json
 PYTHONPATH=src python3 -m unittest discover -s tests -v
@@ -115,6 +117,8 @@ Install the local CLI:
 python3 -m pip install -e .
 mfd panels
 mfd predict examples/useful_functions.faa --genome-id candidate_001
+mfd import-eggnog examples/eggnog_mapper.emapper.annotations
+mfd import-domtblout examples/pfam.domtblout --database Pfam
 mfd predict-annotations examples/annotation_hits.tsv --genome-id candidate_001
 mfd validate examples/prediction.example.json
 ```
@@ -130,4 +134,12 @@ protein_id	database	accession	name	evalue
 p1	CAZy	GH5	glycoside hydrolase family 5 cellulase	1e-40
 p2	KEGG	K02588	nitrogenase iron protein nifH	1e-50
 p3	CARD	blaTEM	beta-lactamase	1e-20
+```
+
+You can also convert common annotation tool outputs into this normalized TSV:
+
+```bash
+mfd import-eggnog examples/eggnog_mapper.emapper.annotations > annotation_hits.tsv
+mfd import-domtblout examples/pfam.domtblout --database Pfam >> annotation_hits.tsv
+mfd predict-annotations annotation_hits.tsv --genome-id candidate_001
 ```

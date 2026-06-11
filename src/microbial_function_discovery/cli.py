@@ -9,6 +9,7 @@ from pathlib import Path
 
 from microbial_function_discovery.annotations import parse_annotation_hits_tsv
 from microbial_function_discovery.baseline import predict_from_annotation_hits, predict_from_fasta
+from microbial_function_discovery.importers import format_annotation_hits_tsv, parse_eggnog_mapper, parse_hmmer_domtblout
 from microbial_function_discovery.panels import list_panels
 from microbial_function_discovery.validation import PredictionValidationError, validate_prediction
 
@@ -40,6 +41,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Genome id to place in the prediction JSON.",
     )
 
+    import_eggnog_parser = subparsers.add_parser(
+        "import-eggnog",
+        help="Convert eggNOG-mapper annotations to normalized annotation-hit TSV.",
+    )
+    import_eggnog_parser.add_argument("path", type=Path, help="Path to .emapper.annotations file.")
+
+    import_domtblout_parser = subparsers.add_parser(
+        "import-domtblout",
+        help="Convert HMMER --domtblout output to normalized annotation-hit TSV.",
+    )
+    import_domtblout_parser.add_argument("path", type=Path, help="Path to domtblout file.")
+    import_domtblout_parser.add_argument("--database", required=True, help="Database name, e.g. Pfam or dbCAN.")
+
     return parser
 
 
@@ -55,6 +69,10 @@ def main(argv: list[str] | None = None) -> int:
         return _predict(args.path, args.genome_id)
     if args.command == "predict-annotations":
         return _predict_annotations(args.path, args.genome_id)
+    if args.command == "import-eggnog":
+        return _import_eggnog(args.path)
+    if args.command == "import-domtblout":
+        return _import_domtblout(args.path, args.database)
 
     parser.error(f"unknown command: {args.command}")
     return 2
@@ -120,6 +138,34 @@ def _predict_annotations(path: Path, genome_id: str | None) -> int:
         return 1
 
     print(json.dumps(prediction, indent=2, sort_keys=True))
+    return 0
+
+
+def _import_eggnog(path: Path) -> int:
+    try:
+        hits = parse_eggnog_mapper(path.read_text())
+    except FileNotFoundError:
+        print(f"{path}: file not found", file=sys.stderr)
+        return 1
+    except ValueError as exc:
+        print(f"{path}: invalid eggNOG annotations: {exc}", file=sys.stderr)
+        return 1
+
+    print(format_annotation_hits_tsv(hits), end="")
+    return 0
+
+
+def _import_domtblout(path: Path, database: str) -> int:
+    try:
+        hits = parse_hmmer_domtblout(path.read_text(), database=database)
+    except FileNotFoundError:
+        print(f"{path}: file not found", file=sys.stderr)
+        return 1
+    except ValueError as exc:
+        print(f"{path}: invalid domtblout: {exc}", file=sys.stderr)
+        return 1
+
+    print(format_annotation_hits_tsv(hits), end="")
     return 0
 
 

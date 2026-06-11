@@ -1,0 +1,3 @@
+#query	seed_ortholog	evalue	score	eggNOG_OGs	max_annot_lvl	COG_category	Description	Preferred_name	GOs	EC	KEGG_ko	KEGG_Pathway	KEGG_Module	KEGG_Reaction	KEGG_rclass	BRITE	KEGG_TC	CAZy	BiGG_Reaction	PFAMs
+p1	1234.ENOG	1e-60	250	COG123	2	B	glycoside hydrolase family 5 cellulase	celA	-	3.2.1.4	ko:K01179	-	-	-	-	-	-	GH5	-	PF00150
+p2	1235.ENOG	1e-55	240	COG124	2	E	nitrogenase iron protein	nifH	-	1.18.6.1	ko:K02588	-	-	-	-	-	-	-	-	PF00142
