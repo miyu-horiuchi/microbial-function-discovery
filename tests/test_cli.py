@@ -747,6 +747,42 @@ class CliTests(unittest.TestCase):
         self.assertIn("Top Validation-Ready Microbial Leads", report_text)
         self.assertIn("## Leads by Panel", report_text)
 
+    def test_render_validation_packets_command_writes_markdown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            leads_path = tmp_path / "leads.tsv"
+            packets_path = tmp_path / "packets.md"
+            leads_path.write_text(
+                "panel\ttarget_key\tlabel\tsource\ttarget_precision\trank\tgenome_id\tspecies\tgenus\tfamily\taccession\tscore\trisk_level\tbiosafety_flags\tevidence\n"
+                "food_fermentation_agriculture\tfood_fermentation_agriculture:metabolite_production__butyrate\tmetabolite_production__butyrate\tannotation\t1.0\t1\tG1\tCandidateus utilis\tCandidateus\tUsefulaceae\tGCA_000000001\t0.99\tmoderate\tpredicted_amr_signal\teggNOG:1RJ5B;eggNOG:1RJ6A\n"
+                "biosafety\tbiosafety:gram_stain__positive\tgram_stain__positive\tfusion\t1.0\t1\tG2\tSafety screenus\tSafety\tScreenaceae\tGCA_000000002\t0.95\tlow\t\tcandidate_score\n"
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "microbial_function_discovery.cli",
+                    "render-validation-packets",
+                    str(leads_path),
+                    "--out",
+                    str(packets_path),
+                    "--limit",
+                    "1",
+                    "--exclude-panel",
+                    "biosafety",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            packets = packets_path.read_text()
+
+        self.assertIn("wrote 1 validation packets", result.stdout)
+        self.assertIn("Candidateus utilis", packets)
+        self.assertIn("eggNOG:1RJ5B", packets)
+        self.assertNotIn("Safety screenus", packets)
+
 
 def _write_fake_executable(path: Path, body: str) -> Path:
     script = "#!/usr/bin/env python3\n" + textwrap.dedent(body).strip() + "\n"

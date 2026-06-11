@@ -21,9 +21,12 @@ from microbial_function_discovery.dense_learning import (
 from microbial_function_discovery.discovery import (
     annotate_discovery_candidates,
     export_safe_leads,
+    parse_lead_table,
     render_discovery_candidate_report,
     render_safe_leads_report,
+    render_validation_packets,
     safe_leads_delimited,
+    select_validation_packet_leads,
     to_json,
 )
 from microbial_function_discovery.features import FeatureMatrix, build_feature_matrix_from_annotation_tsv
@@ -391,6 +394,19 @@ def build_parser() -> argparse.ArgumentParser:
     safe_leads_parser.add_argument("--allow-missing-accession", action="store_true", help="Do not require genome accession.")
     safe_leads_parser.add_argument("--allow-missing-evidence", action="store_true", help="Do not require evidence.")
 
+    validation_packets_parser = subparsers.add_parser(
+        "render-validation-packets",
+        help="Render wet-lab validation packets from an exported lead TSV.",
+    )
+    validation_packets_parser.add_argument("leads", type=Path, help="Path to exported lead TSV.")
+    validation_packets_parser.add_argument("--out", type=Path, required=True, help="Output Markdown packet path.")
+    validation_packets_parser.add_argument("--limit", type=int, default=20, help="Maximum packets to render.")
+    validation_packets_parser.add_argument("--min-precision", type=float, default=0.0, help="Minimum target precision.")
+    validation_packets_parser.add_argument("--allowed-risk", action="append", default=None, help="Allowed risk level. Repeat for multiple values.")
+    validation_packets_parser.add_argument("--include-panel", action="append", default=None, help="Panel to include. Repeat for multiple values.")
+    validation_packets_parser.add_argument("--exclude-panel", action="append", default=None, help="Panel to exclude. Repeat for multiple values.")
+    validation_packets_parser.add_argument("--title", default="Wet-Lab Validation Packets", help="Markdown title.")
+
     predict_baseline_parser = subparsers.add_parser(
         "predict-baseline",
         help="Emit product-style prediction JSON from a trained baseline model.",
@@ -543,6 +559,17 @@ def main(argv: list[str] | None = None) -> int:
             args.max_leads,
             not args.allow_missing_accession,
             not args.allow_missing_evidence,
+        )
+    if args.command == "render-validation-packets":
+        return _render_validation_packets(
+            args.leads,
+            args.out,
+            args.limit,
+            args.min_precision,
+            args.allowed_risk,
+            args.include_panel,
+            args.exclude_panel,
+            args.title,
         )
     if args.command == "predict-baseline":
         return _predict_baseline(args.model, args.features, args.genome_id)
@@ -1235,6 +1262,40 @@ def _export_safe_leads(
         report_out_path.parent.mkdir(parents=True, exist_ok=True)
         report_out_path.write_text(render_safe_leads_report(export))
         print(f"wrote safe leads report to {report_out_path}")
+    return 0
+
+
+def _render_validation_packets(
+    leads_path: Path,
+    out_path: Path,
+    limit: int,
+    min_precision: float,
+    allowed_risks: list[str] | None,
+    include_panels: list[str] | None,
+    exclude_panels: list[str] | None,
+    title: str,
+) -> int:
+    try:
+        leads = parse_lead_table(leads_path.read_text())
+        selected = select_validation_packet_leads(
+            leads,
+            limit=limit,
+            min_precision=min_precision,
+            allowed_risks=allowed_risks,
+            include_panels=include_panels,
+            exclude_panels=exclude_panels,
+        )
+        markdown = render_validation_packets(selected, title=title)
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except ValueError as exc:
+        print(f"cannot render validation packets: {exc}", file=sys.stderr)
+        return 1
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(markdown)
+    print(f"wrote {len(selected)} validation packets to {out_path}")
     return 0
 
 

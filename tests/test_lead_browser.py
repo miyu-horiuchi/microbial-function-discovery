@@ -55,6 +55,16 @@ class LeadBrowserTests(unittest.TestCase):
         self.assertIn("eggNOG:1RM9G", detail)
         self.assertIn("GCA_004340465", detail)
 
+    def test_packaged_review_leads_are_loadable(self):
+        root = Path(__file__).resolve().parents[1]
+        product_leads = load_leads(root / "examples" / "product_leads.review.tsv")
+        safe_leads = load_leads(root / "examples" / "safe_leads.review.tsv")
+
+        self.assertEqual(len(product_leads), 25)
+        self.assertEqual(len(safe_leads), 20)
+        self.assertIn("predicted_human_pathogenicity", product_leads[0]["biosafety_flags"])
+        self.assertEqual(safe_leads[0]["risk_level"], "low")
+
 
 if __name__ == "__main__":
     unittest.main()

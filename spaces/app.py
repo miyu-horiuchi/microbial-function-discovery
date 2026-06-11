@@ -30,10 +30,23 @@ except ModuleNotFoundError:
     )
 
 
-ROOT = Path(__file__).resolve().parents[1]
+SPACE_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _example_path(filename: str) -> Path:
+    for root in [SPACE_ROOT, REPO_ROOT]:
+        path = root / "examples" / filename
+        if path.exists():
+            return path
+    return REPO_ROOT / "examples" / filename
+
+
 DEFAULT_DATASETS = {
-    "Product review sample": ROOT / "examples" / "product_leads.sample.tsv",
-    "Strict safe sample": ROOT / "examples" / "safe_leads.sample.tsv",
+    "Product review leads": _example_path("product_leads.review.tsv"),
+    "Strict safe leads": _example_path("safe_leads.review.tsv"),
+    "Product review sample": _example_path("product_leads.sample.tsv"),
+    "Strict safe sample": _example_path("safe_leads.sample.tsv"),
 }
 
 CSS = """
@@ -141,7 +154,7 @@ def _find_detail(leads: list[dict[str, Any]], genome_id: str) -> dict[str, Any] 
 
 def create_app() -> gr.Blocks:
     datasets = _dataset_map()
-    default_dataset = "Local LEADS_TSV" if "Local LEADS_TSV" in datasets else "Product review sample"
+    default_dataset = "Local LEADS_TSV" if "Local LEADS_TSV" in datasets else "Product review leads"
     default_leads = _load_dataset(default_dataset)
     default_filtered = filter_leads(default_leads)
 

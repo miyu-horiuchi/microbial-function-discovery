@@ -283,6 +283,109 @@ def render_safe_leads_report(export: dict[str, Any], *, max_leads: int = 10) -> 
     return "\n".join(lines)
 
 
+def parse_lead_table(text: str, *, delimiter: str = "\t") -> list[dict[str, Any]]:
+    """Parse an exported lead table into typed lead rows."""
+
+    reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
+    return [_coerce_lead_table_row(row) for row in reader]
+
+
+def select_validation_packet_leads(
+    leads: list[dict[str, Any]],
+    *,
+    limit: int = 20,
+    min_precision: float = 0.0,
+    allowed_risks: list[str] | None = None,
+    include_panels: list[str] | None = None,
+    exclude_panels: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Select lead rows for wet-lab validation packet rendering."""
+
+    risks = set(allowed_risks or [])
+    included = set(include_panels or [])
+    excluded = set(exclude_panels or [])
+    selected = []
+    for lead in leads:
+        panel = str(lead.get("panel", ""))
+        risk = str(lead.get("risk_level", ""))
+        if included and panel not in included:
+            continue
+        if excluded and panel in excluded:
+            continue
+        if risks and risk not in risks:
+            continue
+        if float(lead.get("target_precision", 0.0) or 0.0) < min_precision:
+            continue
+        selected.append(lead)
+
+    selected.sort(
+        key=lambda row: (
+            -float(row.get("target_precision", 0.0) or 0.0),
+            int(row.get("rank", 999999) or 999999),
+            -float(row.get("score", 0.0) or 0.0),
+            str(row.get("panel", "")),
+            str(row.get("target_key", "")),
+            str(row.get("genome_id", "")),
+        )
+    )
+    return selected[: max(limit, 0)]
+
+
+def render_validation_packets(
+    leads: list[dict[str, Any]],
+    *,
+    title: str = "Wet-Lab Validation Packets",
+) -> str:
+    """Render selected lead rows as wet-lab validation packets."""
+
+    lines = [
+        f"# {title}",
+        "",
+        "These packets convert model-ranked microbial leads into review units for partner triage.",
+        "They are not release or deployment recommendations.",
+        "",
+        "## Summary",
+        "",
+        f"- Packets: {len(leads)}",
+        f"- Risk mix: {_lead_risk_counts_text(leads)}",
+        f"- Panels: {_lead_panels_text(leads)}",
+        "",
+    ]
+    for index, lead in enumerate(leads, start=1):
+        species = lead.get("species") or lead.get("genus") or "Unknown microbe"
+        label = str(lead.get("label", ""))
+        evidence = _evidence_items(lead)
+        flags = str(lead.get("biosafety_flags", "") or "none")
+        lines.extend(
+            [
+                f"## Packet {index}: {species}",
+                "",
+                f"- Genome ID: `{lead.get('genome_id', '')}`",
+                f"- Accession: `{lead.get('accession', '')}`",
+                f"- Candidate function: {_readable_label(label)}",
+                f"- Target key: `{lead.get('target_key', '')}`",
+                f"- Application panel: `{lead.get('panel', '')}`",
+                f"- Why it matters: {_why_it_matters(lead)}",
+                f"- Model support: source `{lead.get('source', '')}`, target precision `{lead.get('target_precision', '')}`, rank `{lead.get('rank', '')}`, score `{lead.get('score', '')}`",
+                f"- Evidence to review: {', '.join(f'`{item}`' for item in evidence) if evidence else 'none'}",
+                f"- Biosafety review: risk `{lead.get('risk_level', 'unknown')}`, flags `{flags}`",
+                f"- First validation step: {_first_validation_step(lead)}",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "## Operating Notes",
+            "",
+            "- Confirm taxonomy, accession metadata, and strain availability before experimental planning.",
+            "- Re-check biosafety and AMR/pathogenicity signals before culturing or partner handoff.",
+            "- Treat model evidence as prioritization support; require orthogonal assay confirmation.",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def _candidate_evidence(
     genome_id: str,
     target_key: str,
@@ -353,6 +456,71 @@ def _lead_panel_summary(leads: list[dict[str, Any]]) -> dict[str, dict[str, Any]
         if lead["target_key"] not in summary["targets"]:
             summary["targets"].append(lead["target_key"])
     return panels
+
+
+def _coerce_lead_table_row(row: dict[str, str]) -> dict[str, Any]:
+    coerced: dict[str, Any] = {}
+    for key, value in row.items():
+        if key in {"target_precision", "score"}:
+            coerced[key] = float(value) if value not in ("", None) else 0.0
+        elif key == "rank":
+            coerced[key] = int(value) if value not in ("", None) else 0
+        else:
+            coerced[key] = value
+    return coerced
+
+
+def _lead_risk_counts_text(leads: list[dict[str, Any]]) -> str:
+    counts: dict[str, int] = {}
+    for lead in leads:
+        risk = str(lead.get("risk_level", "unknown") or "unknown")
+        counts[risk] = counts.get(risk, 0) + 1
+    return _risk_counts_text(counts)
+
+
+def _lead_panels_text(leads: list[dict[str, Any]]) -> str:
+    panels = sorted({str(lead.get("panel", "unknown") or "unknown") for lead in leads})
+    return ", ".join(panels) if panels else "none"
+
+
+def _evidence_items(lead: dict[str, Any]) -> list[str]:
+    return [item for item in str(lead.get("evidence", "") or "").split(";") if item]
+
+
+def _readable_label(label: str) -> str:
+    return label.replace("__", ": ").replace("_", " ")
+
+
+def _why_it_matters(lead: dict[str, Any]) -> str:
+    panel = str(lead.get("panel", ""))
+    label = _readable_label(str(lead.get("label", "")))
+    if panel == "biofuels_industrial":
+        return f"{label} can prioritize strains or enzymes for feedstock conversion and industrial biocatalysis."
+    if panel == "environmental_terraforming":
+        return f"{label} can prioritize organisms for environmental stress response, remediation, or closed-system bioprocessing assays."
+    if panel == "food_fermentation_agriculture":
+        return f"{label} can prioritize microbes for fermentation, metabolite production, food, or agriculture screens."
+    if panel == "therapeutics_antimicrobials":
+        return f"{label} can prioritize microbial products or interactions for therapeutic and antimicrobial discovery."
+    if panel == "biosafety":
+        return f"{label} is useful for safety characterization and go/no-go triage before application testing."
+    return f"{label} is a targetable function for follow-up microbial screening."
+
+
+def _first_validation_step(lead: dict[str, Any]) -> str:
+    label = str(lead.get("label", ""))
+    panel = str(lead.get("panel", ""))
+    if "carbon_utilization" in label:
+        substrate = label.split("__")[-1].replace("_", " ")
+        return f"Run a growth or activity assay with {substrate} as the target carbon substrate."
+    if "metabolite_production" in label:
+        metabolite = label.split("__")[-1].replace("_", " ")
+        return f"Run targeted {metabolite} quantification under matched culture or enrichment conditions."
+    if "catalase" in label:
+        return "Run catalase and peroxide-stress assays, then compare activity against close relatives."
+    if panel == "biosafety":
+        return "Confirm the predicted safety phenotype with strain-level metadata and standard biosafety screens."
+    return "Design a targeted phenotype assay and confirm the supporting annotation evidence with an orthogonal method."
 
 
 def _risk_counts(annotated_report: dict[str, Any]) -> dict[str, int]:
