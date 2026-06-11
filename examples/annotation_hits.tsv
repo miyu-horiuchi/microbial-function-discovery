@@ -1,0 +1,5 @@
+protein_id	database	accession	name	evalue
+p1	CAZy	GH5	glycoside hydrolase family 5 cellulase	1e-40
+p2	KEGG	K02588	nitrogenase iron protein nifH	1e-50
+p3	CARD	blaTEM	beta-lactamase	1e-20
+p4	VFDB	VF0001	adhesin virulence factor	1e-12

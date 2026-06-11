@@ -52,6 +52,27 @@ class CliTests(unittest.TestCase):
         self.assertEqual(prediction["genome_id"], "candidate_001")
         self.assertIn("application_scores", prediction)
 
+    def test_predict_annotations_command_emits_prediction_json(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "microbial_function_discovery.cli",
+                "predict-annotations",
+                "examples/annotation_hits.tsv",
+                "--genome-id",
+                "candidate_001",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        prediction = json.loads(result.stdout)
+        self.assertEqual(prediction["genome_id"], "candidate_001")
+        function_names = {function["name"] for function in prediction["functions"]}
+        self.assertIn("cellulose degradation", function_names)
+
 
 if __name__ == "__main__":
     unittest.main()

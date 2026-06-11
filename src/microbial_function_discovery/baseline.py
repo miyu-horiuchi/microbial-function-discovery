@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from microbial_function_discovery.annotations import AnnotationHit
 from microbial_function_discovery.fasta import FastaRecord, parse_fasta
 from microbial_function_discovery.panels import APPLICATION_AREAS
 
@@ -105,8 +106,27 @@ def predict_from_fasta(text: str, *, genome_id: str = "input_genome") -> dict:
     """
 
     records = parse_fasta(text)
-    function_hits = [_score_rule(rule, records) for rule in FUNCTION_RULES]
-    function_hits = [hit for hit in function_hits if hit is not None]
+    function_hits = _score_rules(records)
+
+    return _prediction_from_function_hits(
+        function_hits,
+        genome_id=genome_id,
+        novelty_note="Baseline prediction uses annotation keywords only; learned cross-clade calibration is not available yet.",
+    )
+
+
+def predict_from_annotation_hits(hits: list[AnnotationHit], *, genome_id: str = "input_genome") -> dict:
+    """Predict useful functions from structured annotation hits."""
+
+    function_hits = _score_annotation_rules(hits)
+    return _prediction_from_function_hits(
+        function_hits,
+        genome_id=genome_id,
+        novelty_note="Baseline prediction uses structured annotation hits; learned cross-clade calibration is not available yet.",
+    )
+
+
+def _prediction_from_function_hits(function_hits: list[dict], *, genome_id: str, novelty_note: str) -> dict:
 
     functions = [_function_to_json(hit) for hit in function_hits]
     application_scores = _application_scores(function_hits)
@@ -139,10 +159,15 @@ def predict_from_fasta(text: str, *, genome_id: str = "input_genome") -> dict:
             "nearest_training_family": "unknown",
             "generalization_risk": "unknown",
             "notes": [
-                "Baseline prediction uses annotation keywords only; learned cross-clade calibration is not available yet."
+                novelty_note
             ],
         },
     }
+
+
+def _score_rules(records: list[FastaRecord]) -> list[dict]:
+    function_hits = [_score_rule(rule, records) for rule in FUNCTION_RULES]
+    return [hit for hit in function_hits if hit is not None]
 
 
 def _score_rule(rule: FunctionRule, records: list[FastaRecord]) -> dict | None:
@@ -173,6 +198,46 @@ def _score_rule(rule: FunctionRule, records: list[FastaRecord]) -> dict | None:
         "confidence": confidence,
         "evidence": evidence,
     }
+
+
+def _score_annotation_rules(hits: list[AnnotationHit]) -> list[dict]:
+    function_hits = [_score_annotation_rule(rule, hits) for rule in FUNCTION_RULES]
+    return [hit for hit in function_hits if hit is not None]
+
+
+def _score_annotation_rule(rule: FunctionRule, hits: list[AnnotationHit]) -> dict | None:
+    evidence = []
+    for hit in hits:
+        haystack = f"{hit.database} {hit.accession} {hit.name}".lower()
+        matched = [keyword for keyword in rule.keywords if keyword in haystack]
+        if not matched:
+            continue
+        evidence.append(
+            {
+                "type": "database_hit",
+                "id": hit.protein_id,
+                "annotation": f"{rule.name}: matched {', '.join(matched)} ({hit.database}:{hit.accession})",
+                "database": hit.database,
+                "weight": _annotation_weight(hit, matched),
+            }
+        )
+
+    if not evidence:
+        return None
+
+    score = min(0.97, 0.5 + 0.2 * len(evidence))
+    confidence = min(0.92, 0.4 + 0.12 * len(evidence))
+    return {
+        "rule": rule,
+        "score": score,
+        "confidence": confidence,
+        "evidence": evidence,
+    }
+
+
+def _annotation_weight(hit: AnnotationHit, matched: list[str]) -> float:
+    evalue_bonus = 0.2 if hit.evalue is not None and hit.evalue <= 1e-20 else 0.0
+    return round(min(1.0, 0.4 + 0.12 * len(matched) + evalue_bonus), 3)
 
 
 def _function_to_json(hit: dict) -> dict:

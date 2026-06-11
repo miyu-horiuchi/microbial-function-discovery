@@ -7,7 +7,8 @@ import json
 import sys
 from pathlib import Path
 
-from microbial_function_discovery.baseline import predict_from_fasta
+from microbial_function_discovery.annotations import parse_annotation_hits_tsv
+from microbial_function_discovery.baseline import predict_from_annotation_hits, predict_from_fasta
 from microbial_function_discovery.panels import list_panels
 from microbial_function_discovery.validation import PredictionValidationError, validate_prediction
 
@@ -28,6 +29,17 @@ def build_parser() -> argparse.ArgumentParser:
     predict_parser.add_argument("path", type=Path, help="Path to genome/protein FASTA.")
     predict_parser.add_argument("--genome-id", default=None, help="Genome id to place in the prediction JSON.")
 
+    predict_annotations_parser = subparsers.add_parser(
+        "predict-annotations",
+        help="Run the baseline annotation-hit-to-prediction model.",
+    )
+    predict_annotations_parser.add_argument("path", type=Path, help="Path to annotation-hit TSV.")
+    predict_annotations_parser.add_argument(
+        "--genome-id",
+        default=None,
+        help="Genome id to place in the prediction JSON.",
+    )
+
     return parser
 
 
@@ -41,6 +53,8 @@ def main(argv: list[str] | None = None) -> int:
         return _validate(args.path)
     if args.command == "predict":
         return _predict(args.path, args.genome_id)
+    if args.command == "predict-annotations":
+        return _predict_annotations(args.path, args.genome_id)
 
     parser.error(f"unknown command: {args.command}")
     return 2
@@ -80,6 +94,26 @@ def _predict(path: Path, genome_id: str | None) -> int:
         return 1
     except ValueError as exc:
         print(f"{path}: invalid FASTA: {exc}", file=sys.stderr)
+        return 1
+    except PredictionValidationError as exc:
+        print(f"{path}: invalid prediction generated: {exc}", file=sys.stderr)
+        return 1
+
+    print(json.dumps(prediction, indent=2, sort_keys=True))
+    return 0
+
+
+def _predict_annotations(path: Path, genome_id: str | None) -> int:
+    try:
+        annotation_text = path.read_text()
+        hits = parse_annotation_hits_tsv(annotation_text)
+        prediction = predict_from_annotation_hits(hits, genome_id=genome_id or path.stem)
+        validate_prediction(prediction)
+    except FileNotFoundError:
+        print(f"{path}: file not found", file=sys.stderr)
+        return 1
+    except ValueError as exc:
+        print(f"{path}: invalid annotation TSV: {exc}", file=sys.stderr)
         return 1
     except PredictionValidationError as exc:
         print(f"{path}: invalid prediction generated: {exc}", file=sys.stderr)

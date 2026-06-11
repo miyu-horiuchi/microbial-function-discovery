@@ -104,6 +104,7 @@ Run the scaffold without installing dependencies:
 ```bash
 PYTHONPATH=src python3 -m microbial_function_discovery.cli panels
 PYTHONPATH=src python3 -m microbial_function_discovery.cli predict examples/useful_functions.faa --genome-id candidate_001
+PYTHONPATH=src python3 -m microbial_function_discovery.cli predict-annotations examples/annotation_hits.tsv --genome-id candidate_001
 PYTHONPATH=src python3 -m microbial_function_discovery.cli validate examples/prediction.example.json
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
@@ -114,9 +115,19 @@ Install the local CLI:
 python3 -m pip install -e .
 mfd panels
 mfd predict examples/useful_functions.faa --genome-id candidate_001
+mfd predict-annotations examples/annotation_hits.tsv --genome-id candidate_001
 mfd validate examples/prediction.example.json
 ```
 
 The current `predict` command is a transparent annotation-keyword baseline. It
 is useful for exercising the product contract now and will be replaced by
 learned genome encoders as benchmark datasets come online.
+
+For real annotation pipelines, use `predict-annotations` with a TSV containing:
+
+```text
+protein_id	database	accession	name	evalue
+p1	CAZy	GH5	glycoside hydrolase family 5 cellulase	1e-40
+p2	KEGG	K02588	nitrogenase iron protein nifH	1e-50
+p3	CARD	blaTEM	beta-lactamase	1e-20
+```
