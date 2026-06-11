@@ -106,6 +106,8 @@ PYTHONPATH=src python3 -m microbial_function_discovery.cli panels
 PYTHONPATH=src python3 -m microbial_function_discovery.cli predict examples/useful_functions.faa --genome-id candidate_001
 PYTHONPATH=src python3 -m microbial_function_discovery.cli import-eggnog examples/eggnog_mapper.emapper.annotations
 PYTHONPATH=src python3 -m microbial_function_discovery.cli import-domtblout examples/pfam.domtblout --database Pfam
+PYTHONPATH=src python3 -m microbial_function_discovery.cli run-eggnog examples/useful_functions.faa --output-dir outputs/eggnog
+PYTHONPATH=src python3 -m microbial_function_discovery.cli run-domtblout examples/useful_functions.faa --hmm /path/to/Pfam-A.hmm --out outputs/pfam.domtblout --database Pfam
 PYTHONPATH=src python3 -m microbial_function_discovery.cli predict-annotations examples/annotation_hits.tsv --genome-id candidate_001
 PYTHONPATH=src python3 -m microbial_function_discovery.cli validate examples/prediction.example.json
 PYTHONPATH=src python3 -m unittest discover -s tests -v
@@ -119,6 +121,8 @@ mfd panels
 mfd predict examples/useful_functions.faa --genome-id candidate_001
 mfd import-eggnog examples/eggnog_mapper.emapper.annotations
 mfd import-domtblout examples/pfam.domtblout --database Pfam
+mfd run-eggnog examples/useful_functions.faa --output-dir outputs/eggnog
+mfd run-domtblout examples/useful_functions.faa --hmm /path/to/Pfam-A.hmm --out outputs/pfam.domtblout --database Pfam
 mfd predict-annotations examples/annotation_hits.tsv --genome-id candidate_001
 mfd validate examples/prediction.example.json
 ```
@@ -143,3 +147,16 @@ mfd import-eggnog examples/eggnog_mapper.emapper.annotations > annotation_hits.t
 mfd import-domtblout examples/pfam.domtblout --database Pfam >> annotation_hits.tsv
 mfd predict-annotations annotation_hits.tsv --genome-id candidate_001
 ```
+
+To run the external CPU tools directly:
+
+```bash
+mfd run-eggnog proteins.faa --output-dir outputs/eggnog --data-dir /path/to/eggnog_data > annotation_hits.tsv
+mfd run-domtblout proteins.faa --hmm /path/to/Pfam-A.hmm --out outputs/pfam.domtblout --database Pfam >> annotation_hits.tsv
+mfd predict-annotations annotation_hits.tsv --genome-id candidate_001
+```
+
+The runner commands skip existing non-empty output files unless `--force` is
+provided. This is intentionally CPU-first and cache-friendly, reusing the
+annotation strategy from the earlier `microbe-foundation` work instead of
+starting with expensive GPU embedding runs.

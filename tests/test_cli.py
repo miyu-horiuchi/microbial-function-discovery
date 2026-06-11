@@ -2,6 +2,10 @@ import subprocess
 import sys
 import unittest
 import json
+import stat
+import tempfile
+import textwrap
+from pathlib import Path
 
 
 class CliTests(unittest.TestCase):
@@ -107,6 +111,100 @@ class CliTests(unittest.TestCase):
         )
 
         self.assertIn("p1\tPfam\tPF00150.20", result.stdout)
+
+    def test_run_eggnog_command_outputs_annotation_tsv(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            fasta = tmp_path / "proteins.faa"
+            fasta.write_text(">p1\nMKK\n")
+            fake = _write_fake_executable(
+                tmp_path / "fake_emapper.py",
+                """
+                import pathlib
+                import sys
+
+                args = sys.argv
+                out_dir = pathlib.Path(args[args.index("--output_dir") + 1])
+                prefix = args[args.index("-o") + 1]
+                out_dir.mkdir(parents=True, exist_ok=True)
+                (out_dir / f"{prefix}.emapper.annotations").write_text(
+                    "#query\\tevalue\\tDescription\\tKEGG_ko\\tCAZy\\tPFAMs\\n"
+                    "p1\\t1e-40\\tglycoside hydrolase family 5 cellulase\\tko:K01179\\tGH5\\tPF00150\\n"
+                )
+                """,
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "microbial_function_discovery.cli",
+                    "run-eggnog",
+                    str(fasta),
+                    "--output-dir",
+                    str(tmp_path),
+                    "--executable",
+                    str(fake),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertIn("p1\tCAZy\tGH5", result.stdout)
+
+    def test_run_domtblout_command_outputs_annotation_tsv(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            fasta = tmp_path / "proteins.faa"
+            fasta.write_text(">p1\nMKK\n")
+            hmm = tmp_path / "Pfam-A.hmm"
+            hmm.write_text("HMMER3/f\n")
+            out = tmp_path / "pfam.domtblout"
+            fake = _write_fake_executable(
+                tmp_path / "fake_hmmscan.py",
+                """
+                import pathlib
+                import sys
+
+                args = sys.argv
+                out = pathlib.Path(args[args.index("--domtblout") + 1])
+                out.write_text(
+                    "# domtblout\\n"
+                    "GH5.hmm PF00150.20 300 p1 - 320 1e-40 180.0 0.0 1 1 1e-42 1e-40 180.0 0.0 5 290 10 300 8 305 0.98 glycoside hydrolase family 5 cellulase\\n"
+                )
+                """,
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "microbial_function_discovery.cli",
+                    "run-domtblout",
+                    str(fasta),
+                    "--hmm",
+                    str(hmm),
+                    "--out",
+                    str(out),
+                    "--database",
+                    "Pfam",
+                    "--executable",
+                    str(fake),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertIn("p1\tPfam\tPF00150.20", result.stdout)
+
+
+def _write_fake_executable(path: Path, body: str) -> Path:
+    script = "#!/usr/bin/env python3\n" + textwrap.dedent(body).strip() + "\n"
+    path.write_text(script)
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+    return path
 
 
 if __name__ == "__main__":
