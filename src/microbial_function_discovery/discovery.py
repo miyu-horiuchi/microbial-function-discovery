@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import csv
+import io
 from typing import Any
 
 from microbial_function_discovery.datasets import LabelRecord
@@ -15,6 +17,23 @@ BIOSAFETY_TARGETS = {
     "pathogenicity_human": "biosafety:pathogenicity_human",
     "pathogenicity_animal": "biosafety:pathogenicity_animal",
 }
+SAFE_LEAD_FIELDS = [
+    "panel",
+    "target_key",
+    "label",
+    "source",
+    "target_precision",
+    "rank",
+    "genome_id",
+    "species",
+    "genus",
+    "family",
+    "accession",
+    "score",
+    "risk_level",
+    "biosafety_flags",
+    "evidence",
+]
 
 
 def annotate_discovery_candidates(
@@ -137,6 +156,133 @@ def render_discovery_candidate_report(annotated_report: dict[str, Any], *, max_t
     return "\n".join(lines)
 
 
+def export_safe_leads(
+    annotated_report: dict[str, Any],
+    *,
+    allowed_risks: list[str] | None = None,
+    min_precision: float = 0.5,
+    precision_k: int = 10,
+    require_accession: bool = True,
+    require_evidence: bool = True,
+    max_leads: int | None = None,
+) -> dict[str, Any]:
+    """Flatten annotated candidate rankings into validation-ready lead rows."""
+
+    risks = set(allowed_risks or ["low", "unknown"])
+    precision_metric = f"precision_at_{precision_k}"
+    leads = []
+    for target in annotated_report.get("targets", []):
+        target_precision = float(target.get("metrics", {}).get(precision_metric, 0.0))
+        if target_precision < min_precision:
+            continue
+        for candidate in target.get("candidates", []):
+            lead = _lead_row(target, candidate, target_precision)
+            if lead["risk_level"] not in risks:
+                continue
+            if require_accession and not lead["accession"]:
+                continue
+            if require_evidence and not lead["evidence"]:
+                continue
+            leads.append(lead)
+
+    leads.sort(
+        key=lambda row: (
+            -float(row["target_precision"]),
+            int(row["rank"] or 0),
+            row["panel"],
+            row["target_key"],
+            row["genome_id"],
+        )
+    )
+    if max_leads is not None:
+        leads = leads[:max_leads]
+    return {
+        "precision_metric": precision_metric,
+        "min_precision": min_precision,
+        "allowed_risks": sorted(risks),
+        "require_accession": require_accession,
+        "require_evidence": require_evidence,
+        "n_leads": len(leads),
+        "leads": leads,
+        "panels": _lead_panel_summary(leads),
+    }
+
+
+def safe_leads_delimited(export: dict[str, Any], *, delimiter: str = "\t") -> str:
+    """Render safe leads as TSV or CSV text."""
+
+    out = io.StringIO()
+    writer = csv.DictWriter(out, fieldnames=SAFE_LEAD_FIELDS, delimiter=delimiter, lineterminator="\n")
+    writer.writeheader()
+    for lead in export.get("leads", []):
+        writer.writerow({field: lead.get(field, "") for field in SAFE_LEAD_FIELDS})
+    return out.getvalue()
+
+
+def render_safe_leads_report(export: dict[str, Any], *, max_leads: int = 10) -> str:
+    """Render a product-style shortlist report for validation-ready leads."""
+
+    lines = [
+        "# Top Validation-Ready Microbial Leads",
+        "",
+        "This shortlist filters annotated model candidates by target precision, biosafety risk, accession availability, and evidence availability.",
+        "",
+        "## Summary",
+        "",
+        f"- Leads exported: {export.get('n_leads', 0)}",
+        f"- Precision metric: {export.get('precision_metric', 'unknown')}",
+        f"- Minimum precision: {export.get('min_precision', 'n/a')}",
+        f"- Allowed risks: {', '.join(export.get('allowed_risks', []))}",
+        "",
+        "## Leads",
+        "",
+        "| Panel | Target | Genome | Species | Accession | Score | Risk | Evidence |",
+        "|---|---|---|---|---|---:|---|---|",
+    ]
+    for lead in export.get("leads", [])[:max_leads]:
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    _markdown_cell(lead.get("panel")),
+                    f"`{lead.get('target_key', '')}`",
+                    _markdown_cell(lead.get("genome_id")),
+                    _markdown_cell(lead.get("species") or lead.get("genus") or "unknown"),
+                    _markdown_cell(lead.get("accession")),
+                    _format_score(lead.get("score")),
+                    _markdown_cell(lead.get("risk_level")),
+                    _markdown_cell(lead.get("evidence")),
+                ]
+            )
+            + " |"
+        )
+
+    lines.extend(["", "## Leads by Panel", ""])
+    leads_by_panel: dict[str, list[dict[str, Any]]] = {}
+    for lead in export.get("leads", []):
+        leads_by_panel.setdefault(str(lead.get("panel", "unknown")), []).append(lead)
+    for panel, leads in sorted(leads_by_panel.items()):
+        lines.extend([f"### {panel}", ""])
+        for lead in leads[:max_leads]:
+            lines.append(
+                f"- `{lead.get('target_key', '')}`: {lead.get('species') or lead.get('genus') or 'unknown'} "
+                f"({lead.get('genome_id')}, {lead.get('accession')}) "
+                f"score={_format_score(lead.get('score'))}, risk={lead.get('risk_level')}"
+            )
+        lines.append("")
+    lines.extend(
+        [
+            "",
+            "## Notes",
+            "",
+            "- These leads are benchmark-derived shortlists for review, not recommendations for release or deployment.",
+            "- Wet-lab triage should verify biosafety, taxonomy, culturing feasibility, and functional assay design.",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def _candidate_evidence(
     genome_id: str,
     target_key: str,
@@ -174,6 +320,39 @@ def _candidate_evidence(
             }
         )
     return evidence[: max(limit, 1)]
+
+
+def _lead_row(target: dict[str, Any], candidate: dict[str, Any], target_precision: float) -> dict[str, Any]:
+    taxonomy = candidate.get("taxonomy", {})
+    accession = candidate.get("genome_accession", {})
+    biosafety = candidate.get("biosafety", {})
+    return {
+        "panel": str(target.get("panel", "")),
+        "target_key": str(target.get("target_key", "")),
+        "label": str(target.get("label", "")),
+        "source": str(target.get("source", "")),
+        "target_precision": round(target_precision, 6),
+        "rank": candidate.get("rank", ""),
+        "genome_id": str(candidate.get("genome_id", "")),
+        "species": _clean_value(taxonomy.get("species")) or "",
+        "genus": _clean_value(taxonomy.get("genus")) or "",
+        "family": _clean_value(taxonomy.get("family")) or "",
+        "accession": _clean_value(accession.get("accession")) or "",
+        "score": _round(candidate.get("score")),
+        "risk_level": str(biosafety.get("risk_level", "unknown")),
+        "biosafety_flags": ",".join(str(flag) for flag in biosafety.get("flags", [])),
+        "evidence": ";".join(str(item.get("id", "")) for item in candidate.get("evidence", []) if item.get("id")),
+    }
+
+
+def _lead_panel_summary(leads: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    panels: dict[str, dict[str, Any]] = {}
+    for lead in leads:
+        summary = panels.setdefault(lead["panel"], {"n_leads": 0, "targets": []})
+        summary["n_leads"] += 1
+        if lead["target_key"] not in summary["targets"]:
+            summary["targets"].append(lead["target_key"])
+    return panels
 
 
 def _risk_counts(annotated_report: dict[str, Any]) -> dict[str, int]:

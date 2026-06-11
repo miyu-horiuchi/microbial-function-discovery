@@ -670,6 +670,83 @@ class CliTests(unittest.TestCase):
         self.assertEqual(annotated["targets"][0]["candidates"][0]["taxonomy"]["species"], "Candidateus utilis")
         self.assertIn("Candidateus utilis", report)
 
+    def test_export_safe_leads_command_writes_tsv_and_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            annotated_path = tmp_path / "annotated.json"
+            leads_path = tmp_path / "safe_leads.tsv"
+            report_path = tmp_path / "safe_leads.md"
+            annotated_path.write_text(
+                json.dumps(
+                    {
+                        "targets": [
+                            {
+                                "target_key": "biofuels_industrial:cellulose_degradation",
+                                "panel": "biofuels_industrial",
+                                "label": "cellulose_degradation",
+                                "source": "annotation",
+                                "metrics": {"precision_at_10": 0.9},
+                                "candidates": [
+                                    {
+                                        "genome_id": "G3",
+                                        "rank": 1,
+                                        "score": 0.91,
+                                        "taxonomy": {"species": "Candidateus utilis", "genus": "Candidateus"},
+                                        "genome_accession": {"accession": "GCA_000000003"},
+                                        "biosafety": {"risk_level": "low", "flags": []},
+                                        "evidence": [{"id": "CAZy:GH5", "type": "annotation_feature"}],
+                                    },
+                                    {
+                                        "genome_id": "G4",
+                                        "rank": 2,
+                                        "score": 0.89,
+                                        "taxonomy": {"species": "Riskus pathogenus"},
+                                        "genome_accession": {"accession": "GCA_000000004"},
+                                        "biosafety": {"risk_level": "high", "flags": ["known_human_pathogen"]},
+                                        "evidence": [{"id": "CAZy:GH5", "type": "annotation_feature"}],
+                                    },
+                                ],
+                            }
+                        ]
+                    }
+                )
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "microbial_function_discovery.cli",
+                    "export-safe-leads",
+                    str(annotated_path),
+                    "--out",
+                    str(leads_path),
+                    "--report-out",
+                    str(report_path),
+                    "--format",
+                    "tsv",
+                    "--allowed-risk",
+                    "low",
+                    "--allowed-risk",
+                    "unknown",
+                    "--min-precision",
+                    "0.8",
+                    "--precision-k",
+                    "10",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            leads_text = leads_path.read_text()
+            report_text = report_path.read_text()
+
+        self.assertIn("wrote 1 safe leads", result.stdout)
+        self.assertIn("Candidateus utilis", leads_text)
+        self.assertNotIn("Riskus pathogenus", leads_text)
+        self.assertIn("Top Validation-Ready Microbial Leads", report_text)
+        self.assertIn("## Leads by Panel", report_text)
+
 
 def _write_fake_executable(path: Path, body: str) -> Path:
     script = "#!/usr/bin/env python3\n" + textwrap.dedent(body).strip() + "\n"

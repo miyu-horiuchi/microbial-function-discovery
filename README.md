@@ -97,7 +97,9 @@ attribution, and the predictability-gradient paper.
 - [Discovery candidate report](docs/discovery-candidate-report.md)
 - [Legacy baseline comparison](docs/legacy-baseline-comparison.md)
 - [Model roadmap](docs/model-roadmap.md)
+- [Product leads report](docs/product-leads-report.md)
 - [Prediction output schema](schemas/prediction.schema.json)
+- [Safe leads report](docs/safe-leads-report.md)
 - [Target leaderboard](docs/target-leaderboard.md)
 
 ## Developer Quickstart
@@ -290,6 +292,9 @@ The all-target validation-selected leaderboard evaluates 103 targets and finds
 candidate rankings for 25 high-precision targets. See
 [Target leaderboard](docs/target-leaderboard.md) and
 [Discovery candidate report](docs/discovery-candidate-report.md).
+The lead exporter also produces a strict low/unknown-risk shortlist in
+[Safe leads report](docs/safe-leads-report.md) and a broader application review
+shortlist in [Product leads report](docs/product-leads-report.md).
 
 This is a CPU baseline and a data-integration check, not the final foundation
 model. The next model step is calibration: validate the selected fusion weights

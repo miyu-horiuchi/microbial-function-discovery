@@ -20,7 +20,10 @@ from microbial_function_discovery.dense_learning import (
 )
 from microbial_function_discovery.discovery import (
     annotate_discovery_candidates,
+    export_safe_leads,
     render_discovery_candidate_report,
+    render_safe_leads_report,
+    safe_leads_delimited,
     to_json,
 )
 from microbial_function_discovery.features import FeatureMatrix, build_feature_matrix_from_annotation_tsv
@@ -368,6 +371,26 @@ def build_parser() -> argparse.ArgumentParser:
     annotate_candidates_parser.add_argument("--out", type=Path, required=True, help="Output annotated candidate JSON.")
     annotate_candidates_parser.add_argument("--report-out", type=Path, default=None, help="Optional Markdown report output.")
 
+    safe_leads_parser = subparsers.add_parser(
+        "export-safe-leads",
+        help="Export validation-ready leads from annotated discovery candidates.",
+    )
+    safe_leads_parser.add_argument("annotated_candidates", type=Path, help="Annotated discovery candidates JSON.")
+    safe_leads_parser.add_argument("--out", type=Path, required=True, help="Output lead table path.")
+    safe_leads_parser.add_argument("--report-out", type=Path, default=None, help="Optional Markdown shortlist report output.")
+    safe_leads_parser.add_argument("--format", choices=["tsv", "csv"], default="tsv", help="Lead table output format.")
+    safe_leads_parser.add_argument(
+        "--allowed-risk",
+        action="append",
+        default=None,
+        help="Allowed biosafety risk level. Repeat for multiple values.",
+    )
+    safe_leads_parser.add_argument("--min-precision", type=float, default=0.5, help="Minimum target precision to include.")
+    safe_leads_parser.add_argument("--precision-k", type=int, default=10, help="Precision@k field used for filtering.")
+    safe_leads_parser.add_argument("--max-leads", type=int, default=None, help="Maximum lead rows to export.")
+    safe_leads_parser.add_argument("--allow-missing-accession", action="store_true", help="Do not require genome accession.")
+    safe_leads_parser.add_argument("--allow-missing-evidence", action="store_true", help="Do not require evidence.")
+
     predict_baseline_parser = subparsers.add_parser(
         "predict-baseline",
         help="Emit product-style prediction JSON from a trained baseline model.",
@@ -507,6 +530,19 @@ def main(argv: list[str] | None = None) -> int:
             args.evidence_limit,
             args.out,
             args.report_out,
+        )
+    if args.command == "export-safe-leads":
+        return _export_safe_leads(
+            args.annotated_candidates,
+            args.out,
+            args.report_out,
+            args.format,
+            args.allowed_risk,
+            args.min_precision,
+            args.precision_k,
+            args.max_leads,
+            not args.allow_missing_accession,
+            not args.allow_missing_evidence,
         )
     if args.command == "predict-baseline":
         return _predict_baseline(args.model, args.features, args.genome_id)
@@ -1158,6 +1194,47 @@ def _annotate_discovery_candidates(
         report_out_path.parent.mkdir(parents=True, exist_ok=True)
         report_out_path.write_text(render_discovery_candidate_report(annotated))
         print(f"wrote discovery candidate report to {report_out_path}")
+    return 0
+
+
+def _export_safe_leads(
+    annotated_candidates_path: Path,
+    out_path: Path,
+    report_out_path: Path | None,
+    output_format: str,
+    allowed_risks: list[str] | None,
+    min_precision: float,
+    precision_k: int,
+    max_leads: int | None,
+    require_accession: bool,
+    require_evidence: bool,
+) -> int:
+    try:
+        annotated = json.loads(annotated_candidates_path.read_text())
+        export = export_safe_leads(
+            annotated,
+            allowed_risks=allowed_risks,
+            min_precision=min_precision,
+            precision_k=precision_k,
+            require_accession=require_accession,
+            require_evidence=require_evidence,
+            max_leads=max_leads,
+        )
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except (ValueError, KeyError, json.JSONDecodeError) as exc:
+        print(f"cannot export safe leads: {exc}", file=sys.stderr)
+        return 1
+
+    delimiter = "," if output_format == "csv" else "\t"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(safe_leads_delimited(export, delimiter=delimiter))
+    print(f"wrote {export['n_leads']} safe leads to {out_path}")
+    if report_out_path is not None:
+        report_out_path.parent.mkdir(parents=True, exist_ok=True)
+        report_out_path.write_text(render_safe_leads_report(export))
+        print(f"wrote safe leads report to {report_out_path}")
     return 0
 
 

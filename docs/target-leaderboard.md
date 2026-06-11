@@ -17,7 +17,11 @@ Raw outputs:
 - `data/legacy/target_leaderboard.json`
 - `data/legacy/discovery_candidates.top_targets.json`
 - `data/legacy/discovery_candidates.annotated.json`
+- `data/legacy/safe_leads.tsv`
+- `data/legacy/product_leads_review.tsv`
 - [Discovery candidate report](discovery-candidate-report.md)
+- [Safe leads report](safe-leads-report.md)
+- [Product leads report](product-leads-report.md)
 
 ## Summary
 
@@ -102,6 +106,10 @@ That product step is now started in
 top candidates with BacDive taxonomy, genome accessions, evidence features, and
 biosafety flags.
 
+The strict low/unknown-risk shortlist is in [Safe leads report](safe-leads-report.md).
+The broader application review shortlist, including moderate-risk candidates for
+manual safety review, is in [Product leads report](product-leads-report.md).
+
 ## Reproduction
 
 ```bash
@@ -133,4 +141,14 @@ mfd rank-discovery-candidates \
   --precision-k 10 \
   --max-targets 25 \
   --out data/legacy/discovery_candidates.top_targets.json
+
+mfd export-safe-leads \
+  data/legacy/discovery_candidates.annotated.json \
+  --out data/legacy/safe_leads.tsv \
+  --report-out docs/safe-leads-report.md \
+  --format tsv \
+  --allowed-risk low \
+  --allowed-risk unknown \
+  --min-precision 0.5 \
+  --precision-k 10
 ```

@@ -2,7 +2,7 @@ import json
 import unittest
 
 from microbial_function_discovery.datasets import parse_labels_tsv
-from microbial_function_discovery.discovery import annotate_discovery_candidates
+from microbial_function_discovery.discovery import annotate_discovery_candidates, export_safe_leads
 from microbial_function_discovery.features import build_feature_matrix_from_annotation_tsv
 from microbial_function_discovery.learning import train_baseline
 
@@ -87,6 +87,58 @@ class DiscoveryAnnotationTests(unittest.TestCase):
         self.assertGreater(candidate["biosafety"]["predicted_pathogenicity_human"], 0.0)
         self.assertEqual(candidate["evidence"][0]["id"], "CAZy:GH5")
         json.dumps(annotated)
+
+    def test_export_safe_leads_filters_for_validation_ready_candidates(self):
+        annotated = {
+            "targets": [
+                {
+                    "target_key": "biofuels_industrial:cellulose_degradation",
+                    "panel": "biofuels_industrial",
+                    "label": "cellulose_degradation",
+                    "source": "annotation",
+                    "metrics": {"precision_at_10": 0.9},
+                    "candidates": [
+                        {
+                            "genome_id": "G3",
+                            "rank": 1,
+                            "score": 0.91,
+                            "taxonomy": {"species": "Candidateus utilis", "genus": "Candidateus"},
+                            "genome_accession": {"accession": "GCA_000000003"},
+                            "biosafety": {"risk_level": "low", "flags": []},
+                            "evidence": [{"id": "CAZy:GH5", "type": "annotation_feature"}],
+                        },
+                        {
+                            "genome_id": "G4",
+                            "rank": 2,
+                            "score": 0.89,
+                            "taxonomy": {"species": "Riskus pathogenus"},
+                            "genome_accession": {"accession": "GCA_000000004"},
+                            "biosafety": {"risk_level": "high", "flags": ["known_human_pathogen"]},
+                            "evidence": [{"id": "CAZy:GH5", "type": "annotation_feature"}],
+                        },
+                    ],
+                }
+            ]
+        }
+
+        export = export_safe_leads(
+            annotated,
+            allowed_risks=["low", "unknown"],
+            min_precision=0.8,
+            precision_k=10,
+            require_accession=True,
+            require_evidence=True,
+            max_leads=10,
+        )
+
+        self.assertEqual(export["n_leads"], 1)
+        lead = export["leads"][0]
+        self.assertEqual(lead["genome_id"], "G3")
+        self.assertEqual(lead["species"], "Candidateus utilis")
+        self.assertEqual(lead["accession"], "GCA_000000003")
+        self.assertEqual(lead["evidence"], "CAZy:GH5")
+        self.assertEqual(export["panels"]["biofuels_industrial"]["n_leads"], 1)
+        json.dumps(export)
 
 
 if __name__ == "__main__":
