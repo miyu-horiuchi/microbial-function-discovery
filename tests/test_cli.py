@@ -8,6 +8,11 @@ import textwrap
 import zipfile
 from pathlib import Path
 
+from microbial_function_discovery.datasets import parse_labels_tsv
+from microbial_function_discovery.dense_learning import DenseFeatureMatrix, train_dense_baseline
+from microbial_function_discovery.features import build_feature_matrix_from_annotation_tsv
+from microbial_function_discovery.learning import train_baseline
+
 
 class CliTests(unittest.TestCase):
     def test_panels_command_lists_application_areas(self):
@@ -433,6 +438,76 @@ class CliTests(unittest.TestCase):
             ranking_eval = json.loads(ranking_eval_result.stdout)
             self.assertEqual(ranking_eval["metrics"]["precision_at_1"], 1.0)
             self.assertEqual(ranking_eval["metrics"]["hits_at_2"], 1)
+
+    def test_evaluate_fusion_ranking_command_uses_saved_models(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            labels_path = tmp_path / "labels.tsv"
+            annotation_features_path = tmp_path / "features.json"
+            annotation_model_path = tmp_path / "model.json"
+            dense_model_path = tmp_path / "dense_model.json"
+
+            labels_path.write_text(
+                "genome_id\tsplit\tfamily\tpanel\tlabel\tvalue\n"
+                "G1\ttrain\tFamilyA\tbiofuels_industrial\tthermophile\t1\n"
+                "G2\ttrain\tFamilyA\tbiofuels_industrial\tthermophile\t0\n"
+                "G3\ttest\tFamilyB\tbiofuels_industrial\tthermophile\t0\n"
+                "G4\ttest\tFamilyB\tbiofuels_industrial\tthermophile\t1\n"
+            )
+            labels = parse_labels_tsv(labels_path.read_text())
+            annotation_features = build_feature_matrix_from_annotation_tsv(
+                "genome_id\tprotein_id\tdatabase\taccession\tname\tevalue\n"
+                "G1\tp1\tPfam\tPF00001\tpositive\t1e-20\n"
+                "G2\tp1\tPfam\tPF00002\tnegative\t1e-20\n"
+                "G3\tp1\tPfam\tPF00001\tfalse positive\t1e-20\n"
+                "G4\tp1\tPfam\tPF00002\ttrue positive\t1e-20\n"
+            )
+            annotation_features_path.write_text(annotation_features.to_json())
+            annotation_model_path.write_text(train_baseline(annotation_features, labels).to_json())
+            dense_features = DenseFeatureMatrix(
+                genome_ids=["G1", "G2", "G3", "G4"],
+                feature_indexes=[0],
+                rows=[[2.0], [-2.0], [-1.5], [1.5]],
+            )
+            dense_model_path.write_text(train_dense_baseline(dense_features, labels).to_json())
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "microbial_function_discovery.cli",
+                    "evaluate-fusion-ranking",
+                    str(annotation_model_path),
+                    str(annotation_features_path),
+                    str(dense_model_path),
+                    str(labels_path),
+                    "--dense-feature-json",
+                    json.dumps(
+                        {
+                            "genome_ids": dense_features.genome_ids,
+                            "feature_indexes": dense_features.feature_indexes,
+                            "rows": dense_features.rows,
+                        }
+                    ),
+                    "--split",
+                    "test",
+                    "--target",
+                    "biofuels_industrial:thermophile",
+                    "--k",
+                    "1",
+                    "--weight",
+                    "0",
+                    "--weight",
+                    "1",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+        report = json.loads(result.stdout)
+        self.assertEqual(report["best_weight"], 1.0)
+        self.assertEqual(report["best"]["ranked_candidates"][0]["genome_id"], "G4")
 
 
 def _write_fake_executable(path: Path, body: str) -> Path:

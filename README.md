@@ -276,7 +276,14 @@ comparison: eggNOG remains stronger for broad held-out classification, but
 direct BacFormer and ESM2+BacFormer heads beat eggNOG on thermophile ranking.
 See [Legacy baseline comparison](docs/legacy-baseline-comparison.md).
 
+Target-specific late fusion is now implemented with `evaluate-fusion-ranking`.
+On the priority targets, eggNOG + BacFormer and eggNOG + ESM2+BacFormer fusion
+reach thermophile precision@10 = 0.70 and precision@50 = 0.82, while eggNOG +
+Hybrid v3 fusion preserves the strongest human pathogenicity precision@10 =
+0.40. The useful-function ranking layer should therefore select feature sources
+per target instead of assuming one global model wins every application.
+
 This is a CPU baseline and a data-integration check, not the final foundation
-model. The next model step is target-specific fusion: combine eggNOG evidence
-with direct dense embeddings and only advance to a shared genome encoder for
-targets where embeddings show lift over annotation-only features.
+model. The next model step is calibration: validate the selected fusion weights
+on additional useful-function targets and only advance to a shared genome
+encoder for targets where embeddings show lift over annotation-only features.

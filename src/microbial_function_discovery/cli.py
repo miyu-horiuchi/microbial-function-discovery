@@ -12,12 +12,14 @@ from microbial_function_discovery.baseline import predict_from_annotation_hits, 
 from microbial_function_discovery.datasets import FamilyLeakageError, parse_labels_tsv, validate_family_holdout
 from microbial_function_discovery.dense_learning import (
     DenseBaselineModel,
+    DenseFeatureMatrix,
     evaluate_dense_model,
     evaluate_dense_ranking,
     load_dense_npz_feature_matrix,
     train_dense_baseline,
 )
 from microbial_function_discovery.features import FeatureMatrix, build_feature_matrix_from_annotation_tsv
+from microbial_function_discovery.fusion import evaluate_fusion_ranking
 from microbial_function_discovery.importers import format_annotation_hits_tsv, parse_eggnog_mapper, parse_hmmer_domtblout
 from microbial_function_discovery.legacy_import import (
     labels_tsv_from_legacy_tables,
@@ -241,6 +243,43 @@ def build_parser() -> argparse.ArgumentParser:
     )
     evaluate_dense_ranking_parser.add_argument("--out", type=Path, default=None, help="Optional output report JSON.")
 
+    evaluate_fusion_ranking_parser = subparsers.add_parser(
+        "evaluate-fusion-ranking",
+        help="Evaluate top-k ranking after fusing annotation and dense model scores.",
+    )
+    evaluate_fusion_ranking_parser.add_argument("annotation_model", type=Path, help="Path to annotation model JSON.")
+    evaluate_fusion_ranking_parser.add_argument("annotation_features", type=Path, help="Path to annotation feature matrix JSON.")
+    evaluate_fusion_ranking_parser.add_argument("dense_model", type=Path, help="Path to dense model JSON.")
+    evaluate_fusion_ranking_parser.add_argument("labels", type=Path, help="Path to benchmark labels TSV.")
+    dense_source_group = evaluate_fusion_ranking_parser.add_mutually_exclusive_group(required=True)
+    dense_source_group.add_argument("--dense-npz", type=Path, help="Dense feature NPZ with bacdive_ids/features.")
+    dense_source_group.add_argument("--dense-feature-json", help="Dense feature matrix JSON, used by lightweight tests.")
+    evaluate_fusion_ranking_parser.add_argument("--split", default="test", help="Split to evaluate.")
+    fusion_group = evaluate_fusion_ranking_parser.add_mutually_exclusive_group(required=True)
+    fusion_group.add_argument("--target", help="Target key, e.g. biosafety:pathogenicity_human.")
+    fusion_group.add_argument("--panel", help="Application panel, e.g. biosafety.")
+    evaluate_fusion_ranking_parser.add_argument(
+        "--k",
+        type=int,
+        action="append",
+        default=None,
+        help="Top-k cutoff to evaluate. Repeat for multiple cutoffs.",
+    )
+    evaluate_fusion_ranking_parser.add_argument(
+        "--weight",
+        type=float,
+        action="append",
+        default=None,
+        help="Dense score weight to test. Repeat for a grid.",
+    )
+    evaluate_fusion_ranking_parser.add_argument(
+        "--select-k",
+        type=int,
+        default=None,
+        help="Precision@k metric used to select the best weight.",
+    )
+    evaluate_fusion_ranking_parser.add_argument("--out", type=Path, default=None, help="Optional output report JSON.")
+
     predict_baseline_parser = subparsers.add_parser(
         "predict-baseline",
         help="Emit product-style prediction JSON from a trained baseline model.",
@@ -325,6 +364,22 @@ def main(argv: list[str] | None = None) -> int:
         return _evaluate_ranking(args.model, args.features, args.labels, args.split, args.target, args.panel, args.k, args.out)
     if args.command == "evaluate-dense-ranking":
         return _evaluate_dense_ranking(args.model, args.npz, args.labels, args.split, args.target, args.panel, args.k, args.out)
+    if args.command == "evaluate-fusion-ranking":
+        return _evaluate_fusion_ranking(
+            args.annotation_model,
+            args.annotation_features,
+            args.dense_model,
+            args.labels,
+            args.dense_npz,
+            args.dense_feature_json,
+            args.split,
+            args.target,
+            args.panel,
+            args.k,
+            args.weight,
+            args.select_k,
+            args.out,
+        )
     if args.command == "predict-baseline":
         return _predict_baseline(args.model, args.features, args.genome_id)
     if args.command == "rank-candidates":
@@ -791,6 +846,74 @@ def _evaluate_dense_ranking(
     else:
         print(text)
     return 0
+
+
+def _evaluate_fusion_ranking(
+    annotation_model_path: Path,
+    annotation_features_path: Path,
+    dense_model_path: Path,
+    labels_path: Path,
+    dense_npz_path: Path | None,
+    dense_feature_json: str | None,
+    split: str,
+    target_key: str | None,
+    panel: str | None,
+    ks: list[int] | None,
+    weights: list[float] | None,
+    select_k: int | None,
+    out_path: Path | None,
+) -> int:
+    try:
+        annotation_model = BaselineModel.from_json(annotation_model_path.read_text())
+        annotation_features = FeatureMatrix.from_json(annotation_features_path.read_text())
+        dense_model = DenseBaselineModel.from_json(dense_model_path.read_text())
+        labels = parse_labels_tsv(labels_path.read_text())
+        if dense_npz_path is not None:
+            keep_genome_ids = {record.genome_id for record in labels}
+            dense_features = load_dense_npz_feature_matrix(
+                dense_npz_path,
+                keep_genome_ids=keep_genome_ids,
+                feature_indexes=dense_model.feature_indexes,
+            )
+        else:
+            dense_features = _dense_features_from_json(dense_feature_json or "")
+        report = evaluate_fusion_ranking(
+            annotation_model,
+            annotation_features,
+            dense_model,
+            dense_features,
+            labels,
+            split=split,
+            target_key=target_key,
+            panel=panel,
+            ks=ks,
+            weights=weights,
+            select_k=select_k,
+        )
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except (RuntimeError, ValueError, KeyError, json.JSONDecodeError) as exc:
+        print(f"cannot evaluate fusion ranking: {exc}", file=sys.stderr)
+        return 1
+
+    text = json.dumps(report, indent=2, sort_keys=True)
+    if out_path is not None:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(text)
+        print(f"wrote fusion ranking evaluation report to {out_path}")
+    else:
+        print(text)
+    return 0
+
+
+def _dense_features_from_json(text: str) -> DenseFeatureMatrix:
+    data = json.loads(text)
+    return DenseFeatureMatrix(
+        genome_ids=[str(value) for value in data["genome_ids"]],
+        feature_indexes=[int(value) for value in data["feature_indexes"]],
+        rows=[[float(value) for value in row] for row in data["rows"]],
+    )
 
 
 def _predict_baseline(model_path: Path, features_path: Path, genome_id: str) -> int:

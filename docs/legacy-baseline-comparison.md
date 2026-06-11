@@ -22,6 +22,9 @@ All runs use:
 | BacFormer direct dense | 38,333 | 104 | 0.7282 | 0.70 | 0.50 | 0.00 | 0.14 |
 | ESM2 + BacFormer direct dense | 37,309 | 104 | 0.7177 | 0.70 | 0.52 | 0.20 | 0.28 |
 | Hybrid v3 direct dense | 28,679 | 101 | 0.7138 | 0.20 | 0.26 | 0.40 | 0.16 |
+| eggNOG + BacFormer fusion | target ranking only | 2 | n/a | 0.70 | 0.82 | 0.10 | 0.16 |
+| eggNOG + ESM2+BacFormer fusion | target ranking only | 2 | n/a | 0.70 | 0.82 | 0.20 | 0.20 |
+| eggNOG + Hybrid v3 fusion | target ranking only | 2 | n/a | 0.20 | 0.08 | 0.40 | 0.18 |
 
 ## Interpretation
 
@@ -32,10 +35,18 @@ thermophile ranking, while Hybrid v3 has the best human pathogenicity
 precision@10. Embeddings are therefore useful for target-level discovery
 ranking, but they do not yet beat eggNOG for broad trait classification.
 
+Late fusion confirms that useful-function discovery should be target-specific.
+For thermophile discovery, eggNOG + BacFormer and eggNOG + ESM2+BacFormer keep
+precision@10 at 0.70 and lift precision@50 to 0.82 on the common labeled
+candidate set. For human pathogenicity, Hybrid v3 remains the strongest
+precision@10 signal at 0.40, and a small dense weight preserves that top-k
+gain while slightly improving precision@50 over annotation-only ranking.
+
 The immediate model lesson is:
 
 - keep eggNOG as the required CPU baseline
 - use direct dense embedding heads for priority target ranking
+- use target-specific late fusion where embeddings improve discovery precision
 - evaluate each application target separately, because broad panel metrics can
   hide target-level failures
 - move toward a shared genome encoder only for targets where embeddings already
@@ -59,4 +70,14 @@ mfd evaluate-dense-ranking data/legacy/dense_model.esm2.json \
   --split test \
   --target biofuels_industrial:temperature_class__thermophile \
   --k 10 --k 50
+mfd evaluate-fusion-ranking \
+  data/legacy/model.1000.json \
+  data/legacy/features.1000.json \
+  data/legacy/dense_model.bacformer.json \
+  data/legacy/labels.tsv \
+  --dense-npz /Users/miyuhoriuchi/microbe-foundation/data/bacformer_features_clean.npz \
+  --split test \
+  --target biofuels_industrial:temperature_class__thermophile \
+  --k 10 --k 50 \
+  --weight 0 --weight 0.25 --weight 0.5 --weight 0.75 --weight 1
 ```
