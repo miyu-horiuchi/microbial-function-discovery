@@ -100,6 +100,7 @@ attribution, and the predictability-gradient paper.
 - [Product leads report](docs/product-leads-report.md)
 - [Prediction output schema](schemas/prediction.schema.json)
 - [Safe leads report](docs/safe-leads-report.md)
+- [Spaces lead-review demo](spaces/README.md)
 - [Target leaderboard](docs/target-leaderboard.md)
 
 ## Developer Quickstart
@@ -191,6 +192,27 @@ mfd evaluate-dense-ranking \
 The current `predict` command is a transparent annotation-keyword baseline. It
 is useful for exercising the product contract now and will be replaced by
 learned genome encoders as benchmark datasets come online.
+
+## No-GPU Lead Review Demo
+
+The `spaces/` app is a lightweight Gradio browser for exported candidate-lead
+TSVs. It runs on CPU and is meant for quick review of product leads before any
+wet-lab follow-up.
+
+```bash
+uv run --with 'gradio>=4.44,<6' python spaces/app.py
+```
+
+It ships with sample outputs from the current lead exporter:
+
+- `examples/product_leads.sample.tsv`: broader application review shortlist
+- `examples/safe_leads.sample.tsv`: strict low/unknown-risk shortlist
+
+To review a local full export:
+
+```bash
+LEADS_TSV=data/legacy/product_leads_review.tsv uv run --with 'gradio>=4.44,<6' python spaces/app.py
+```
 
 For real annotation pipelines, use `predict-annotations` with a TSV containing:
 
