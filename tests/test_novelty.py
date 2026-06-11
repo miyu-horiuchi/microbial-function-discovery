@@ -58,3 +58,14 @@ class NoveltyReferenceTests(unittest.TestCase):
     def test_ignores_ids_absent_from_matrix(self):
         ref = AnnotationNoveltyReference(k=2).fit(_matrix(), ["R1", "R2", "R3", "GHOST"])
         self.assertEqual(len(ref._ref_sets), 3)
+
+    def test_degenerate_reference_keeps_identical_typical_and_difference_novel(self):
+        m = FeatureMatrix(genome_ids=["A", "B", "C"], feature_names=["f0", "f1"], rows=[[1, 0], [1, 0], [1, 0]])
+        ref = AnnotationNoveltyReference(k=2).fit(m, ["A", "B", "C"])
+        self.assertEqual(ref.level(ref.score([1, 0])), "typical")
+        # No reference spread -> a different candidate is "novel", never "highly_novel".
+        self.assertEqual(ref.level(ref.score([0, 1])), "novel")
+
+    def test_score_before_fit_raises(self):
+        with self.assertRaises(ValueError):
+            AnnotationNoveltyReference().score([1, 0])

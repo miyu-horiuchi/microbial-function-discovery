@@ -74,18 +74,26 @@ class AnnotationNoveltyReference:
         return self
 
     def score(self, feature_vector: list[int]) -> float:
+        if not self._ref_sets:
+            raise ValueError("score() called before fit()")
         s = _row_to_set(feature_vector)
         dists = sorted(jaccard_distance(s, t) for t in self._ref_sets)
         kk = min(self.k_, len(dists))
         return sum(dists[:kk]) / kk
 
     def level(self, score: float) -> str:
-        if score >= self.extreme_threshold_ and self.extreme_threshold_ > self.threshold_:
+        # Both boundaries strict so a candidate identical to the reference
+        # (score 0.0, threshold 0.0 in a zero-spread reference) stays "typical".
+        if score > self.extreme_threshold_ and self.extreme_threshold_ > self.threshold_:
             return "highly_novel"
         if score > self.threshold_:
             return "novel"
         return "typical"
 
     def ref_percentile(self, score: float) -> float:
+        """Fraction of reference self-scores below `score` (mid-rank for ties);
+        higher = more novel relative to the training set."""
+        n = len(self._ref_scores)
         below = sum(1 for x in self._ref_scores if x < score)
-        return below / len(self._ref_scores)
+        equal = sum(1 for x in self._ref_scores if x == score)
+        return (below + 0.5 * equal) / n

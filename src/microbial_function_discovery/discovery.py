@@ -275,7 +275,8 @@ def render_safe_leads_report(export: dict[str, Any], *, max_leads: int = 10) -> 
             lines.append(
                 f"- `{lead.get('target_key', '')}`: {lead.get('species') or lead.get('genus') or 'unknown'} "
                 f"({lead.get('genome_id')}, {lead.get('accession')}) "
-                f"score={_format_score(lead.get('score'))}, risk={lead.get('risk_level')}"
+                f"score={_format_score(lead.get('score'))}, risk={lead.get('risk_level')}, "
+                f"novelty={lead.get('novelty_level')}"
             )
         lines.append("")
     lines.extend(
