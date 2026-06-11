@@ -188,5 +188,44 @@ class DiscoveryAnnotationTests(unittest.TestCase):
         self.assertIsNone(cand["novelty"]["score"])
 
 
+    def _annotated_for_reports(self):
+        features = build_feature_matrix_from_annotation_tsv(ANNOTATIONS_TSV)
+        labels = parse_labels_tsv(LABELS_TSV)
+        model = train_baseline(features, labels)
+        candidates = {
+            "split": "test",
+            "targets": [
+                {
+                    "target_key": "biofuels_industrial:cellulose_degradation",
+                    "panel": "biofuels_industrial",
+                    "label": "cellulose_degradation",
+                    "source": "annotation",
+                    "metrics": {"precision_at_10": 1.0},
+                    "candidates": [{"genome_id": "G3", "rank": 1, "score": 0.9}],
+                }
+            ],
+        }
+        return annotate_discovery_candidates(candidates, [], [], model, features, labels)
+
+    def test_candidate_report_has_novelty_column(self):
+        from microbial_function_discovery.discovery import render_discovery_candidate_report
+        report = render_discovery_candidate_report(self._annotated_for_reports())
+        self.assertIn("Novelty", report)
+        self.assertIn("representativeness", report.lower())
+
+    def test_safe_leads_carry_novelty_level(self):
+        from microbial_function_discovery.discovery import (
+            export_safe_leads,
+            render_safe_leads_report,
+            SAFE_LEAD_FIELDS,
+        )
+        export = export_safe_leads(self._annotated_for_reports(), require_accession=False, require_evidence=False)
+        self.assertIn("novelty_level", SAFE_LEAD_FIELDS)
+        self.assertTrue(export["leads"], "expected at least one lead")
+        self.assertIn("novelty_level", export["leads"][0])
+        report = render_safe_leads_report(export)
+        self.assertIn("Novelty", report)
+
+
 if __name__ == "__main__":
     unittest.main()

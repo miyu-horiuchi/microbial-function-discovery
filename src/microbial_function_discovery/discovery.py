@@ -34,6 +34,7 @@ SAFE_LEAD_FIELDS = [
     "risk_level",
     "biosafety_flags",
     "evidence",
+    "novelty_level",
 ]
 
 
@@ -121,8 +122,8 @@ def render_discovery_candidate_report(annotated_report: dict[str, Any], *, max_t
         "",
         "## Top Candidates",
         "",
-        "| Target | Rank | Genome | Species | Source | Score | Safety | Evidence |",
-        "|---|---:|---|---|---|---:|---|---|",
+        "| Target | Rank | Genome | Species | Source | Score | Safety | Novelty | Evidence |",
+        "|---|---:|---|---|---|---:|---|---|---|",
     ]
     for target in annotated_report.get("targets", [])[:max_targets]:
         for candidate in target.get("candidates", [])[:1]:
@@ -140,6 +141,7 @@ def render_discovery_candidate_report(annotated_report: dict[str, Any], *, max_t
                         str(target.get("source", "")),
                         _format_score(candidate.get("score")),
                         str(candidate.get("biosafety", {}).get("risk_level", "unknown")),
+                        str(candidate.get("novelty", {}).get("level", "unknown")),
                         _markdown_cell(evidence_text),
                     ]
                 )
@@ -154,6 +156,7 @@ def render_discovery_candidate_report(annotated_report: dict[str, Any], *, max_t
             "- These are ranked benchmark candidates, not wet-lab validated recommendations.",
             "- Safety flags combine known BacDive fields with annotation-baseline biosafety scores when available.",
             "- Evidence lists active annotation features with positive target weights; dense-only leads may have limited feature evidence.",
+            "- Novelty = how unlike the training set a candidate is (annotation-feature Jaccard distance); it is a representativeness signal, NOT a confidence or correctness estimate.",
             "",
         ]
     )
@@ -240,8 +243,8 @@ def render_safe_leads_report(export: dict[str, Any], *, max_leads: int = 10) -> 
         "",
         "## Leads",
         "",
-        "| Panel | Target | Genome | Species | Accession | Score | Risk | Evidence |",
-        "|---|---|---|---|---|---:|---|---|",
+        "| Panel | Target | Genome | Species | Accession | Score | Risk | Novelty | Evidence |",
+        "|---|---|---|---|---|---:|---|---|---|",
     ]
     for lead in export.get("leads", [])[:max_leads]:
         lines.append(
@@ -255,6 +258,7 @@ def render_safe_leads_report(export: dict[str, Any], *, max_leads: int = 10) -> 
                     _markdown_cell(lead.get("accession")),
                     _format_score(lead.get("score")),
                     _markdown_cell(lead.get("risk_level")),
+                    _markdown_cell(lead.get("novelty_level")),
                     _markdown_cell(lead.get("evidence")),
                 ]
             )
@@ -471,6 +475,7 @@ def _lead_row(target: dict[str, Any], candidate: dict[str, Any], target_precisio
         "risk_level": str(biosafety.get("risk_level", "unknown")),
         "biosafety_flags": ",".join(str(flag) for flag in biosafety.get("flags", [])),
         "evidence": ";".join(str(item.get("id", "")) for item in candidate.get("evidence", []) if item.get("id")),
+        "novelty_level": str(candidate.get("novelty", {}).get("level", "unknown")),
     }
 
 
