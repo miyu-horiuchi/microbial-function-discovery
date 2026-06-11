@@ -19,7 +19,11 @@ from microbial_function_discovery.dense_learning import (
     train_dense_baseline,
 )
 from microbial_function_discovery.features import FeatureMatrix, build_feature_matrix_from_annotation_tsv
-from microbial_function_discovery.fusion import evaluate_fusion_ranking
+from microbial_function_discovery.fusion import (
+    evaluate_fusion_leaderboard,
+    evaluate_fusion_ranking,
+    rank_discovery_candidates,
+)
 from microbial_function_discovery.importers import format_annotation_hits_tsv, parse_eggnog_mapper, parse_hmmer_domtblout
 from microbial_function_discovery.legacy_import import (
     labels_tsv_from_legacy_tables,
@@ -280,6 +284,71 @@ def build_parser() -> argparse.ArgumentParser:
     )
     evaluate_fusion_ranking_parser.add_argument("--out", type=Path, default=None, help="Optional output report JSON.")
 
+    leaderboard_parser = subparsers.add_parser(
+        "evaluate-fusion-leaderboard",
+        help="Select best annotation/dense/fusion source per target on validation and report test metrics.",
+    )
+    leaderboard_parser.add_argument("annotation_model", type=Path, help="Path to annotation model JSON.")
+    leaderboard_parser.add_argument("annotation_features", type=Path, help="Path to annotation feature matrix JSON.")
+    leaderboard_parser.add_argument("labels", type=Path, help="Path to benchmark labels TSV.")
+    leaderboard_parser.add_argument(
+        "--dense-source",
+        nargs=3,
+        action="append",
+        metavar=("NAME", "MODEL", "NPZ"),
+        default=None,
+        help="Dense source name, dense model JSON, and dense NPZ. Repeat for multiple sources.",
+    )
+    leaderboard_parser.add_argument(
+        "--dense-feature-json-source",
+        nargs=3,
+        action="append",
+        metavar=("NAME", "MODEL", "JSON"),
+        default=None,
+        help="Dense source name, dense model JSON, and dense feature JSON.",
+    )
+    leaderboard_parser.add_argument("--validation-split", default="val", help="Split used to select source/weight.")
+    leaderboard_parser.add_argument("--test-split", default="test", help="Split used for final held-out metrics.")
+    leaderboard_parser.add_argument(
+        "--k",
+        type=int,
+        action="append",
+        default=None,
+        help="Top-k cutoff to evaluate. Repeat for multiple cutoffs.",
+    )
+    leaderboard_parser.add_argument(
+        "--weight",
+        type=float,
+        action="append",
+        default=None,
+        help="Dense score weight to test for fusion. Repeat for a grid.",
+    )
+    leaderboard_parser.add_argument("--select-k", type=int, default=None, help="Precision@k metric used for selection.")
+    leaderboard_parser.add_argument("--out", type=Path, default=None, help="Optional output leaderboard JSON.")
+
+    discovery_parser = subparsers.add_parser(
+        "rank-discovery-candidates",
+        help="Generate candidate rankings for targets selected in a fusion leaderboard.",
+    )
+    discovery_parser.add_argument("annotation_model", type=Path, help="Path to annotation model JSON.")
+    discovery_parser.add_argument("annotation_features", type=Path, help="Path to annotation feature matrix JSON.")
+    discovery_parser.add_argument("labels", type=Path, help="Path to benchmark labels TSV.")
+    discovery_parser.add_argument("leaderboard", type=Path, help="Path to target leaderboard JSON.")
+    discovery_parser.add_argument(
+        "--dense-source",
+        nargs=3,
+        action="append",
+        metavar=("NAME", "MODEL", "NPZ"),
+        default=None,
+        help="Dense source name, dense model JSON, and dense NPZ. Repeat for multiple sources.",
+    )
+    discovery_parser.add_argument("--split", default="test", help="Split to rank candidates from.")
+    discovery_parser.add_argument("--limit-per-target", type=int, default=10, help="Maximum candidates per target.")
+    discovery_parser.add_argument("--min-precision", type=float, default=0.0, help="Minimum leaderboard precision to include.")
+    discovery_parser.add_argument("--precision-k", type=int, default=10, help="Precision@k field used for filtering.")
+    discovery_parser.add_argument("--max-targets", type=int, default=None, help="Maximum targets to include.")
+    discovery_parser.add_argument("--out", type=Path, default=None, help="Optional output candidates JSON.")
+
     predict_baseline_parser = subparsers.add_parser(
         "predict-baseline",
         help="Emit product-style prediction JSON from a trained baseline model.",
@@ -378,6 +447,34 @@ def main(argv: list[str] | None = None) -> int:
             args.k,
             args.weight,
             args.select_k,
+            args.out,
+        )
+    if args.command == "evaluate-fusion-leaderboard":
+        return _evaluate_fusion_leaderboard(
+            args.annotation_model,
+            args.annotation_features,
+            args.labels,
+            args.dense_source,
+            args.dense_feature_json_source,
+            args.validation_split,
+            args.test_split,
+            args.k,
+            args.weight,
+            args.select_k,
+            args.out,
+        )
+    if args.command == "rank-discovery-candidates":
+        return _rank_discovery_candidates(
+            args.annotation_model,
+            args.annotation_features,
+            args.labels,
+            args.leaderboard,
+            args.dense_source,
+            args.split,
+            args.limit_per_target,
+            args.min_precision,
+            args.precision_k,
+            args.max_targets,
             args.out,
         )
     if args.command == "predict-baseline":
@@ -907,6 +1004,88 @@ def _evaluate_fusion_ranking(
     return 0
 
 
+def _evaluate_fusion_leaderboard(
+    annotation_model_path: Path,
+    annotation_features_path: Path,
+    labels_path: Path,
+    dense_source_specs: list[list[str]] | None,
+    dense_json_source_specs: list[list[str]] | None,
+    validation_split: str,
+    test_split: str,
+    ks: list[int] | None,
+    weights: list[float] | None,
+    select_k: int | None,
+    out_path: Path | None,
+) -> int:
+    try:
+        annotation_model = BaselineModel.from_json(annotation_model_path.read_text())
+        annotation_features = FeatureMatrix.from_json(annotation_features_path.read_text())
+        labels = parse_labels_tsv(labels_path.read_text())
+        dense_sources = _load_dense_sources(labels, dense_source_specs, dense_json_source_specs)
+        report = evaluate_fusion_leaderboard(
+            annotation_model,
+            annotation_features,
+            dense_sources,
+            labels,
+            validation_split=validation_split,
+            test_split=test_split,
+            ks=ks,
+            weights=weights,
+            select_k=select_k,
+        )
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except (RuntimeError, ValueError, KeyError, json.JSONDecodeError) as exc:
+        print(f"cannot evaluate fusion leaderboard: {exc}", file=sys.stderr)
+        return 1
+
+    _write_or_print_json(report, out_path, f"wrote fusion leaderboard to {out_path}" if out_path else "")
+    return 0
+
+
+def _rank_discovery_candidates(
+    annotation_model_path: Path,
+    annotation_features_path: Path,
+    labels_path: Path,
+    leaderboard_path: Path,
+    dense_source_specs: list[list[str]] | None,
+    split: str,
+    limit_per_target: int,
+    min_precision: float,
+    precision_k: int,
+    max_targets: int | None,
+    out_path: Path | None,
+) -> int:
+    try:
+        annotation_model = BaselineModel.from_json(annotation_model_path.read_text())
+        annotation_features = FeatureMatrix.from_json(annotation_features_path.read_text())
+        labels = parse_labels_tsv(labels_path.read_text())
+        leaderboard = json.loads(leaderboard_path.read_text())
+        dense_sources = _load_dense_sources(labels, dense_source_specs, None)
+        report = rank_discovery_candidates(
+            leaderboard,
+            annotation_model,
+            annotation_features,
+            dense_sources,
+            labels,
+            split=split,
+            limit_per_target=limit_per_target,
+            min_precision=min_precision,
+            precision_k=precision_k,
+            max_targets=max_targets,
+        )
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except (RuntimeError, ValueError, KeyError, json.JSONDecodeError) as exc:
+        print(f"cannot rank discovery candidates: {exc}", file=sys.stderr)
+        return 1
+
+    _write_or_print_json(report, out_path, f"wrote discovery candidate rankings to {out_path}" if out_path else "")
+    return 0
+
+
 def _dense_features_from_json(text: str) -> DenseFeatureMatrix:
     data = json.loads(text)
     return DenseFeatureMatrix(
@@ -914,6 +1093,39 @@ def _dense_features_from_json(text: str) -> DenseFeatureMatrix:
         feature_indexes=[int(value) for value in data["feature_indexes"]],
         rows=[[float(value) for value in row] for row in data["rows"]],
     )
+
+
+def _load_dense_sources(
+    labels: list,
+    dense_source_specs: list[list[str]] | None,
+    dense_json_source_specs: list[list[str]] | None,
+) -> dict[str, tuple[DenseBaselineModel, DenseFeatureMatrix]]:
+    dense_sources: dict[str, tuple[DenseBaselineModel, DenseFeatureMatrix]] = {}
+    keep_genome_ids = {record.genome_id for record in labels}
+    for name, model_path, npz_path in dense_source_specs or []:
+        dense_model = DenseBaselineModel.from_json(Path(model_path).read_text())
+        dense_features = load_dense_npz_feature_matrix(
+            Path(npz_path),
+            keep_genome_ids=keep_genome_ids,
+            feature_indexes=dense_model.feature_indexes,
+        )
+        dense_sources[name] = (dense_model, dense_features)
+    for name, model_path, feature_json in dense_json_source_specs or []:
+        dense_model = DenseBaselineModel.from_json(Path(model_path).read_text())
+        dense_sources[name] = (dense_model, _dense_features_from_json(feature_json))
+    if not dense_sources:
+        raise ValueError("at least one dense source is required")
+    return dense_sources
+
+
+def _write_or_print_json(report: dict, out_path: Path | None, message: str) -> None:
+    text = json.dumps(report, indent=2, sort_keys=True)
+    if out_path is not None:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(text)
+        print(message)
+    else:
+        print(text)
 
 
 def _predict_baseline(model_path: Path, features_path: Path, genome_id: str) -> int:

@@ -42,6 +42,11 @@ candidate set. For human pathogenicity, Hybrid v3 remains the strongest
 precision@10 signal at 0.40, and a small dense weight preserves that top-k
 gain while slightly improving precision@50 over annotation-only ranking.
 
+The follow-up all-target leaderboard selects each source/weight on `val` and
+reports final metrics on `test`. It evaluates 103 targets and identifies 37
+where dense or fusion beats annotation. See
+[Target leaderboard](target-leaderboard.md).
+
 The immediate model lesson is:
 
 - keep eggNOG as the required CPU baseline

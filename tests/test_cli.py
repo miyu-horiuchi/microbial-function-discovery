@@ -509,6 +509,81 @@ class CliTests(unittest.TestCase):
         self.assertEqual(report["best_weight"], 1.0)
         self.assertEqual(report["best"]["ranked_candidates"][0]["genome_id"], "G4")
 
+    def test_evaluate_fusion_leaderboard_command_outputs_target_winners(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            labels_path = tmp_path / "labels.tsv"
+            annotation_features_path = tmp_path / "features.json"
+            annotation_model_path = tmp_path / "model.json"
+            dense_model_path = tmp_path / "dense_model.json"
+
+            labels_path.write_text(
+                "genome_id\tsplit\tfamily\tpanel\tlabel\tvalue\n"
+                "G1\ttrain\tFamilyA\tbiofuels_industrial\tthermophile\t1\n"
+                "G2\ttrain\tFamilyA\tbiofuels_industrial\tthermophile\t0\n"
+                "G3\tval\tFamilyB\tbiofuels_industrial\tthermophile\t0\n"
+                "G4\tval\tFamilyB\tbiofuels_industrial\tthermophile\t1\n"
+                "G5\ttest\tFamilyC\tbiofuels_industrial\tthermophile\t0\n"
+                "G6\ttest\tFamilyC\tbiofuels_industrial\tthermophile\t1\n"
+            )
+            labels = parse_labels_tsv(labels_path.read_text())
+            annotation_features = build_feature_matrix_from_annotation_tsv(
+                "genome_id\tprotein_id\tdatabase\taccession\tname\tevalue\n"
+                "G1\tp1\tPfam\tPF00001\tpositive\t1e-20\n"
+                "G2\tp1\tPfam\tPF00002\tnegative\t1e-20\n"
+                "G3\tp1\tPfam\tPF00001\tval false positive\t1e-20\n"
+                "G4\tp1\tPfam\tPF00002\tval true positive\t1e-20\n"
+                "G5\tp1\tPfam\tPF00001\ttest false positive\t1e-20\n"
+                "G6\tp1\tPfam\tPF00002\ttest true positive\t1e-20\n"
+            )
+            annotation_features_path.write_text(annotation_features.to_json())
+            annotation_model_path.write_text(train_baseline(annotation_features, labels).to_json())
+            dense_features = DenseFeatureMatrix(
+                genome_ids=["G1", "G2", "G3", "G4", "G5", "G6"],
+                feature_indexes=[0],
+                rows=[[2.0], [-2.0], [-1.5], [1.5], [-1.4], [1.4]],
+            )
+            dense_model_path.write_text(train_dense_baseline(dense_features, labels).to_json())
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "microbial_function_discovery.cli",
+                    "evaluate-fusion-leaderboard",
+                    str(annotation_model_path),
+                    str(annotation_features_path),
+                    str(labels_path),
+                    "--dense-feature-json-source",
+                    "dense",
+                    str(dense_model_path),
+                    json.dumps(
+                        {
+                            "genome_ids": dense_features.genome_ids,
+                            "feature_indexes": dense_features.feature_indexes,
+                            "rows": dense_features.rows,
+                        }
+                    ),
+                    "--validation-split",
+                    "val",
+                    "--test-split",
+                    "test",
+                    "--k",
+                    "1",
+                    "--weight",
+                    "0",
+                    "--weight",
+                    "1",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+        leaderboard = json.loads(result.stdout)
+        self.assertEqual(leaderboard["targets"][0]["best_source"], "dense")
+        self.assertEqual(leaderboard["targets"][0]["test_metrics"]["precision_at_1"], 1.0)
+
 
 def _write_fake_executable(path: Path, body: str) -> Path:
     script = "#!/usr/bin/env python3\n" + textwrap.dedent(body).strip() + "\n"
