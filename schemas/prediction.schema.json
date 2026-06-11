@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/miyu-horiuchi/microbial-function-discovery/schemas/prediction.schema.json",
+  "title": "Microbial Function Discovery Prediction",
+  "type": "object",
+  "required": ["genome_id", "application_scores", "functions", "biosafety", "novelty"],
+  "properties": {
+    "genome_id": {
+      "type": "string"
+    },
+    "application_scores": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["area", "score", "confidence"],
+        "properties": {
+          "area": {
+            "type": "string",
+            "enum": [
+              "environmental_terraforming",
+              "therapeutics_antimicrobials",
+              "biofuels_industrial",
+              "food_fermentation_agriculture",
+              "biosafety"
+            ]
+          },
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "top_functions": {
+            "type": "array",
+            "items": {"type": "string"}
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "functions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "score", "evidence"],
+        "properties": {
+          "name": {"type": "string"},
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["type", "id"],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": ["protein", "gene", "domain", "pathway", "database_hit"]
+                },
+                "id": {"type": "string"},
+                "annotation": {"type": "string"},
+                "database": {"type": "string"},
+                "status": {"type": "string"},
+                "weight": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "biosafety": {
+      "type": "object",
+      "required": ["pathogenicity_risk", "amr_risk", "warnings"],
+      "properties": {
+        "pathogenicity_risk": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "amr_risk": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "warnings": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "novelty": {
+      "type": "object",
+      "required": ["generalization_risk"],
+      "properties": {
+        "nearest_training_family": {"type": "string"},
+        "nearest_training_genus": {"type": "string"},
+        "generalization_risk": {
+          "type": "string",
+          "enum": ["low", "medium", "high", "unknown"]
+        },
+        "notes": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
+
