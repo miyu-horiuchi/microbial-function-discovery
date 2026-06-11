@@ -113,6 +113,7 @@ PYTHONPATH=src python3 -m microbial_function_discovery.cli validate-splits examp
 PYTHONPATH=src python3 -m microbial_function_discovery.cli build-features examples/multi_genome_annotation_hits.tsv --out outputs/features.json
 PYTHONPATH=src python3 -m microbial_function_discovery.cli train-baseline outputs/features.json examples/benchmark_labels.tsv --out outputs/model.json
 PYTHONPATH=src python3 -m microbial_function_discovery.cli evaluate outputs/model.json outputs/features.json examples/benchmark_labels.tsv --split test
+PYTHONPATH=src python3 -m microbial_function_discovery.cli evaluate-ranking outputs/model.json outputs/features.json examples/benchmark_labels.tsv --split test --target biofuels_industrial:cellulose_degradation --k 1 --k 10
 PYTHONPATH=src python3 -m microbial_function_discovery.cli predict-baseline outputs/model.json outputs/features.json --genome-id G3
 PYTHONPATH=src python3 -m microbial_function_discovery.cli rank-candidates outputs/model.json outputs/features.json --target biofuels_industrial:cellulose_degradation --limit 10
 PYTHONPATH=src python3 -m microbial_function_discovery.cli validate examples/prediction.example.json
@@ -134,6 +135,7 @@ mfd validate-splits examples/benchmark_labels.tsv
 mfd build-features examples/multi_genome_annotation_hits.tsv --out outputs/features.json
 mfd train-baseline outputs/features.json examples/benchmark_labels.tsv --out outputs/model.json
 mfd evaluate outputs/model.json outputs/features.json examples/benchmark_labels.tsv --split test
+mfd evaluate-ranking outputs/model.json outputs/features.json examples/benchmark_labels.tsv --split test --target biofuels_industrial:cellulose_degradation --k 1 --k 10
 mfd predict-baseline outputs/model.json outputs/features.json --genome-id G3
 mfd rank-candidates outputs/model.json outputs/features.json --target biofuels_industrial:cellulose_degradation --limit 10
 mfd validate examples/prediction.example.json
@@ -183,10 +185,17 @@ mfd validate-splits examples/benchmark_labels.tsv
 mfd build-features examples/multi_genome_annotation_hits.tsv --out outputs/features.json
 mfd train-baseline outputs/features.json examples/benchmark_labels.tsv --out outputs/model.json
 mfd evaluate outputs/model.json outputs/features.json examples/benchmark_labels.tsv --split test
+mfd evaluate-ranking outputs/model.json outputs/features.json examples/benchmark_labels.tsv --split test --target biofuels_industrial:cellulose_degradation --k 1 --k 10
+mfd evaluate-ranking outputs/model.json outputs/features.json examples/benchmark_labels.tsv --split test --panel biofuels_industrial --k 1 --k 10
 mfd predict-baseline outputs/model.json outputs/features.json --genome-id G3
 mfd rank-candidates outputs/model.json outputs/features.json --target biofuels_industrial:cellulose_degradation --limit 10
 mfd rank-candidates outputs/model.json outputs/features.json --panel biofuels_industrial --limit 10
 ```
+
+Use `evaluate` for per-label classification accuracy and `evaluate-ranking`
+for the discovery question: are true positives enriched near the top of the
+candidate list? The ranking report includes `hits_at_k`, `precision_at_k`,
+`recall_at_k`, and the labeled held-out candidates in ranked order.
 
 Label TSV format:
 

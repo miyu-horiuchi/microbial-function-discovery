@@ -36,6 +36,10 @@ Required leakage controls:
 | evidence enrichment | Whether highlighted genes/pathways match known function databases |
 | ablation sensitivity | Whether predictions depend on highlighted evidence |
 
+The scaffold reports top-k discovery metrics with `mfd evaluate-ranking`.
+Target-level ranking evaluates one function label, while panel-level ranking
+treats any positive label inside the application panel as a useful hit.
+
 ## Baselines
 
 Every report should include:
@@ -99,4 +103,3 @@ Examples:
 
 Each model should emit one JSON object per genome following
 `schemas/prediction.schema.json`.
-

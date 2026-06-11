@@ -3,7 +3,13 @@ import unittest
 
 from microbial_function_discovery.datasets import parse_labels_tsv
 from microbial_function_discovery.features import build_feature_matrix_from_annotation_tsv
-from microbial_function_discovery.learning import evaluate_model, predict_model, rank_candidates, train_baseline
+from microbial_function_discovery.learning import (
+    evaluate_model,
+    evaluate_ranking,
+    predict_model,
+    rank_candidates,
+    train_baseline,
+)
 from microbial_function_discovery.validation import validate_prediction
 
 
@@ -87,6 +93,41 @@ class LearningTests(unittest.TestCase):
         self.assertEqual(ranking["mode"], "panel")
         self.assertEqual(ranking["query"], "biofuels_industrial")
         self.assertEqual(len(ranking["candidates"]), 2)
+
+    def test_evaluate_ranking_by_target_reports_precision_at_k(self):
+        features = build_feature_matrix_from_annotation_tsv(ANNOTATIONS_TSV)
+        labels = parse_labels_tsv(LABELS_TSV)
+        model = train_baseline(features, labels)
+
+        report = evaluate_ranking(
+            model,
+            features,
+            labels,
+            split="test",
+            target_key="biofuels_industrial:cellulose_degradation",
+            ks=[1, 2],
+        )
+
+        self.assertEqual(report["mode"], "target")
+        self.assertEqual(report["query"], "biofuels_industrial:cellulose_degradation")
+        self.assertEqual(report["split"], "test")
+        self.assertEqual(report["n_labeled_candidates"], 2)
+        self.assertEqual(report["n_positives"], 1)
+        self.assertEqual(report["metrics"]["precision_at_1"], 1.0)
+        self.assertEqual(report["metrics"]["recall_at_1"], 1.0)
+        self.assertEqual(report["ranked_candidates"][0]["genome_id"], "G3")
+        json.dumps(report)
+
+    def test_evaluate_ranking_by_panel_treats_any_positive_panel_label_as_hit(self):
+        features = build_feature_matrix_from_annotation_tsv(ANNOTATIONS_TSV)
+        labels = parse_labels_tsv(LABELS_TSV)
+        model = train_baseline(features, labels)
+
+        report = evaluate_ranking(model, features, labels, split="test", panel="biofuels_industrial", ks=[1])
+
+        self.assertEqual(report["mode"], "panel")
+        self.assertEqual(report["query"], "biofuels_industrial")
+        self.assertEqual(report["metrics"]["hits_at_1"], 1)
 
 
 if __name__ == "__main__":

@@ -12,7 +12,14 @@ from microbial_function_discovery.baseline import predict_from_annotation_hits, 
 from microbial_function_discovery.datasets import FamilyLeakageError, parse_labels_tsv, validate_family_holdout
 from microbial_function_discovery.features import FeatureMatrix, build_feature_matrix_from_annotation_tsv
 from microbial_function_discovery.importers import format_annotation_hits_tsv, parse_eggnog_mapper, parse_hmmer_domtblout
-from microbial_function_discovery.learning import BaselineModel, evaluate_model, predict_model, rank_candidates, train_baseline
+from microbial_function_discovery.learning import (
+    BaselineModel,
+    evaluate_model,
+    evaluate_ranking,
+    predict_model,
+    rank_candidates,
+    train_baseline,
+)
 from microbial_function_discovery.panels import list_panels
 from microbial_function_discovery.runners import run_eggnog_mapper, run_hmmer_domtblout
 from microbial_function_discovery.validation import PredictionValidationError, validate_prediction
@@ -114,6 +121,26 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_parser.add_argument("--split", default="test", help="Split to evaluate.")
     evaluate_parser.add_argument("--out", type=Path, default=None, help="Optional output report JSON.")
 
+    evaluate_ranking_parser = subparsers.add_parser(
+        "evaluate-ranking",
+        help="Evaluate top-k candidate ranking against held-out labels.",
+    )
+    evaluate_ranking_parser.add_argument("model", type=Path, help="Path to model JSON.")
+    evaluate_ranking_parser.add_argument("features", type=Path, help="Path to feature matrix JSON.")
+    evaluate_ranking_parser.add_argument("labels", type=Path, help="Path to benchmark labels TSV.")
+    evaluate_ranking_parser.add_argument("--split", default="test", help="Split to evaluate.")
+    ranking_group = evaluate_ranking_parser.add_mutually_exclusive_group(required=True)
+    ranking_group.add_argument("--target", help="Target key, e.g. biofuels_industrial:cellulose_degradation.")
+    ranking_group.add_argument("--panel", help="Application panel, e.g. biofuels_industrial.")
+    evaluate_ranking_parser.add_argument(
+        "--k",
+        type=int,
+        action="append",
+        default=None,
+        help="Top-k cutoff to evaluate. Repeat for multiple cutoffs.",
+    )
+    evaluate_ranking_parser.add_argument("--out", type=Path, default=None, help="Optional output report JSON.")
+
     predict_baseline_parser = subparsers.add_parser(
         "predict-baseline",
         help="Emit product-style prediction JSON from a trained baseline model.",
@@ -164,6 +191,8 @@ def main(argv: list[str] | None = None) -> int:
         return _train_baseline(args.features, args.labels, args.out, args.train_split)
     if args.command == "evaluate":
         return _evaluate(args.model, args.features, args.labels, args.split, args.out)
+    if args.command == "evaluate-ranking":
+        return _evaluate_ranking(args.model, args.features, args.labels, args.split, args.target, args.panel, args.k, args.out)
     if args.command == "predict-baseline":
         return _predict_baseline(args.model, args.features, args.genome_id)
     if args.command == "rank-candidates":
@@ -384,6 +413,46 @@ def _evaluate(model_path: Path, features_path: Path, labels_path: Path, split: s
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(text)
         print(f"wrote evaluation report to {out_path}")
+    else:
+        print(text)
+    return 0
+
+
+def _evaluate_ranking(
+    model_path: Path,
+    features_path: Path,
+    labels_path: Path,
+    split: str,
+    target_key: str | None,
+    panel: str | None,
+    ks: list[int] | None,
+    out_path: Path | None,
+) -> int:
+    try:
+        model = BaselineModel.from_json(model_path.read_text())
+        features = FeatureMatrix.from_json(features_path.read_text())
+        labels = parse_labels_tsv(labels_path.read_text())
+        report = evaluate_ranking(
+            model,
+            features,
+            labels,
+            split=split,
+            target_key=target_key,
+            panel=panel,
+            ks=ks,
+        )
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except (ValueError, KeyError) as exc:
+        print(f"cannot evaluate ranking: {exc}", file=sys.stderr)
+        return 1
+
+    text = json.dumps(report, indent=2, sort_keys=True)
+    if out_path is not None:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(text)
+        print(f"wrote ranking evaluation report to {out_path}")
     else:
         print(text)
     return 0

@@ -313,6 +313,32 @@ class CliTests(unittest.TestCase):
             self.assertEqual(ranking["mode"], "target")
             self.assertEqual(len(ranking["candidates"]), 2)
 
+            ranking_eval_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "microbial_function_discovery.cli",
+                    "evaluate-ranking",
+                    str(model_path),
+                    str(features_path),
+                    "examples/benchmark_labels.tsv",
+                    "--split",
+                    "test",
+                    "--target",
+                    "biofuels_industrial:cellulose_degradation",
+                    "--k",
+                    "1",
+                    "--k",
+                    "2",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            ranking_eval = json.loads(ranking_eval_result.stdout)
+            self.assertEqual(ranking_eval["metrics"]["precision_at_1"], 1.0)
+            self.assertEqual(ranking_eval["metrics"]["hits_at_2"], 1)
+
 
 def _write_fake_executable(path: Path, body: str) -> Path:
     script = "#!/usr/bin/env python3\n" + textwrap.dedent(body).strip() + "\n"

@@ -134,6 +134,63 @@ def evaluate_model(
     }
 
 
+def evaluate_ranking(
+    model: BaselineModel,
+    features: FeatureMatrix,
+    labels: list[LabelRecord],
+    *,
+    split: str,
+    target_key: str | None = None,
+    panel: str | None = None,
+    ks: list[int] | None = None,
+) -> dict[str, Any]:
+    """Evaluate whether top-ranked candidates recover held-out positives."""
+
+    if (target_key is None) == (panel is None):
+        raise ValueError("provide exactly one of target_key or panel")
+    if target_key is not None and target_key not in model.targets:
+        raise KeyError(f"target not found in model: {target_key}")
+    if panel is not None and panel not in APPLICATION_AREAS:
+        raise ValueError(f"unknown panel: {panel}")
+
+    cutoffs = _normalize_cutoffs(ks or [1, 5, 10])
+    truth_by_genome = _ranking_truth(labels, split=split, target_key=target_key, panel=panel)
+    ranked = []
+    for genome_id, truth in truth_by_genome.items():
+        score = _ranking_score(model, features, genome_id, target_key=target_key, panel=panel)
+        ranked.append(
+            {
+                "genome_id": genome_id,
+                "truth": truth,
+                "score": round(score, 6),
+            }
+        )
+
+    ranked.sort(key=lambda row: (-row["score"], row["genome_id"]))
+    for rank, row in enumerate(ranked, start=1):
+        row["rank"] = rank
+
+    n_positives = sum(row["truth"] for row in ranked)
+    metrics: dict[str, float | int] = {}
+    for k in cutoffs:
+        top_k = ranked[:k]
+        hits = sum(row["truth"] for row in top_k)
+        denominator = min(k, len(ranked))
+        metrics[f"hits_at_{k}"] = hits
+        metrics[f"precision_at_{k}"] = hits / denominator if denominator else 0.0
+        metrics[f"recall_at_{k}"] = hits / n_positives if n_positives else 0.0
+
+    return {
+        "mode": "target" if target_key is not None else "panel",
+        "query": target_key if target_key is not None else panel,
+        "split": split,
+        "n_labeled_candidates": len(ranked),
+        "n_positives": n_positives,
+        "metrics": metrics,
+        "ranked_candidates": ranked,
+    }
+
+
 def predict_model(model: BaselineModel, features: FeatureMatrix, *, genome_id: str) -> dict[str, Any]:
     """Emit product-style prediction JSON from a trained baseline model."""
 
@@ -282,6 +339,48 @@ def _train_target_model(features: FeatureMatrix, labels: list[LabelRecord]) -> T
         p_feature_neg = (neg_with + alpha) / (len(negatives) + 2 * alpha)
         weights.append(_logit(p_feature_pos) - _logit(p_feature_neg))
     return TargetModel(prior_log_odds=_logit(prior), feature_log_odds=weights)
+
+
+def _normalize_cutoffs(ks: list[int]) -> list[int]:
+    cutoffs = sorted(set(ks))
+    if not cutoffs or any(k <= 0 for k in cutoffs):
+        raise ValueError("ranking cutoffs must be positive integers")
+    return cutoffs
+
+
+def _ranking_truth(
+    labels: list[LabelRecord],
+    *,
+    split: str,
+    target_key: str | None,
+    panel: str | None,
+) -> dict[str, int]:
+    truth_by_genome: dict[str, int] = {}
+    for record in labels:
+        if record.split != split:
+            continue
+        if target_key is not None and record.target_key != target_key:
+            continue
+        if panel is not None and record.panel != panel:
+            continue
+        truth_by_genome[record.genome_id] = max(truth_by_genome.get(record.genome_id, 0), record.value)
+    return truth_by_genome
+
+
+def _ranking_score(
+    model: BaselineModel,
+    features: FeatureMatrix,
+    genome_id: str,
+    *,
+    target_key: str | None,
+    panel: str | None,
+) -> float:
+    if target_key is not None:
+        return model.predict_proba(target_key, genome_id, features)
+    panel_targets = [key for key in model.targets if key.startswith(f"{panel}:")]
+    if not panel_targets:
+        return 0.05
+    return max(model.predict_proba(key, genome_id, features) for key in panel_targets)
 
 
 def _active_evidence(
