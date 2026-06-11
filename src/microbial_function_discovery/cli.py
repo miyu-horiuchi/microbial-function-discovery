@@ -14,6 +14,7 @@ from microbial_function_discovery.features import FeatureMatrix, build_feature_m
 from microbial_function_discovery.importers import format_annotation_hits_tsv, parse_eggnog_mapper, parse_hmmer_domtblout
 from microbial_function_discovery.legacy_import import (
     labels_tsv_from_legacy_tables,
+    load_legacy_dense_npz_feature_matrix,
     load_legacy_npz_feature_matrix,
     load_table_records,
 )
@@ -139,6 +140,21 @@ def build_parser() -> argparse.ArgumentParser:
     import_legacy_features_parser.add_argument("--min-prevalence", type=int, default=1, help="Minimum feature prevalence.")
     import_legacy_features_parser.add_argument("--feature-prefix", default="eggNOG", help="Feature namespace prefix.")
 
+    import_legacy_dense_parser = subparsers.add_parser(
+        "import-legacy-dense-features",
+        help="Convert cached dense embedding NPZ features to median-binarized feature matrix JSON.",
+    )
+    import_legacy_dense_parser.add_argument("npz", type=Path, help="Legacy dense embedding NPZ.")
+    import_legacy_dense_parser.add_argument("--out", type=Path, required=True, help="Output feature matrix JSON.")
+    import_legacy_dense_parser.add_argument(
+        "--labels",
+        type=Path,
+        default=None,
+        help="Optional benchmark labels TSV used to restrict genomes.",
+    )
+    import_legacy_dense_parser.add_argument("--max-features", type=int, default=1000, help="High-variance features to keep.")
+    import_legacy_dense_parser.add_argument("--feature-prefix", default="embedding", help="Feature namespace prefix.")
+
     train_parser = subparsers.add_parser(
         "train-baseline",
         help="Train a no-GPU baseline model from features and labels.",
@@ -240,6 +256,14 @@ def main(argv: list[str] | None = None) -> int:
             args.labels,
             args.max_features,
             args.min_prevalence,
+            args.feature_prefix,
+        )
+    if args.command == "import-legacy-dense-features":
+        return _import_legacy_dense_features(
+            args.npz,
+            args.out,
+            args.labels,
+            args.max_features,
             args.feature_prefix,
         )
     if args.command == "train-baseline":
@@ -489,6 +513,36 @@ def _import_legacy_eggnog_features(
         return 1
     except (RuntimeError, ValueError, KeyError) as exc:
         print(f"cannot import legacy eggNOG features: {exc}", file=sys.stderr)
+        return 1
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(features.to_json())
+    print(f"wrote {len(features.genome_ids)} genomes x {len(features.feature_names)} features to {out_path}")
+    return 0
+
+
+def _import_legacy_dense_features(
+    npz_path: Path,
+    out_path: Path,
+    labels_path: Path | None,
+    max_features: int,
+    feature_prefix: str,
+) -> int:
+    try:
+        keep_genome_ids = None
+        if labels_path is not None:
+            keep_genome_ids = {record.genome_id for record in parse_labels_tsv(labels_path.read_text())}
+        features = load_legacy_dense_npz_feature_matrix(
+            npz_path,
+            max_features=max_features,
+            feature_prefix=feature_prefix,
+            keep_genome_ids=keep_genome_ids,
+        )
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except (RuntimeError, ValueError, KeyError) as exc:
+        print(f"cannot import legacy dense features: {exc}", file=sys.stderr)
         return 1
 
     out_path.parent.mkdir(parents=True, exist_ok=True)

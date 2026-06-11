@@ -5,6 +5,7 @@ import json
 import stat
 import tempfile
 import textwrap
+import zipfile
 from pathlib import Path
 
 
@@ -252,6 +253,31 @@ class CliTests(unittest.TestCase):
             text = labels.read_text()
         self.assertIn("1\ttrain\tFamilyA\tbiofuels_industrial\ttemperature_class__thermophile\t1", text)
         self.assertIn("2\ttest\tFamilyB\tbiosafety\tpathogenicity_human\t0", text)
+
+    def test_import_legacy_dense_features_reports_missing_numpy_cleanly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            npz = tmp_path / "dense.npz"
+            out = tmp_path / "features.json"
+            with zipfile.ZipFile(npz, "w") as archive:
+                archive.writestr("placeholder", "")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "microbial_function_discovery.cli",
+                    "import-legacy-dense-features",
+                    str(npz),
+                    "--out",
+                    str(out),
+                ],
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("cannot import legacy dense features", result.stderr)
 
     def test_build_features_train_and_evaluate_commands(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -1,6 +1,7 @@
 import unittest
 
 from microbial_function_discovery.legacy_import import (
+    dense_feature_matrix_from_legacy_arrays,
     feature_matrix_from_legacy_arrays,
     labels_tsv_from_legacy_tables,
     records_from_legacy_tables,
@@ -64,6 +65,22 @@ class LegacyImportTests(unittest.TestCase):
         self.assertEqual(matrix.genome_ids, ["1", "2", "3"])
         self.assertEqual(matrix.feature_names, ["eggNOG:common", "eggNOG:middle"])
         self.assertEqual(matrix.rows, [[1, 1], [1, 0], [1, 0]])
+
+    def test_dense_feature_matrix_from_legacy_arrays_selects_high_variance_dimensions(self):
+        matrix = dense_feature_matrix_from_legacy_arrays(
+            bacdive_ids=[1, 2, 3],
+            rows=[
+                [0.1, 0.0, 2.0],
+                [0.2, 10.0, 2.0],
+                [0.3, -10.0, 2.0],
+            ],
+            max_features=2,
+            feature_prefix="ESM2",
+        )
+
+        self.assertEqual(matrix.genome_ids, ["1", "2", "3"])
+        self.assertEqual(matrix.feature_names, ["ESM2:dim_0000_gt_median", "ESM2:dim_0001_gt_median"])
+        self.assertEqual(matrix.rows, [[0, 0], [0, 1], [1, 0]])
 
 
 if __name__ == "__main__":

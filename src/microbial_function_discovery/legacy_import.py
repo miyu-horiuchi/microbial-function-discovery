@@ -201,6 +201,90 @@ def feature_matrix_from_legacy_arrays(
     )
 
 
+def dense_feature_matrix_from_legacy_arrays(
+    *,
+    bacdive_ids: Iterable[Any],
+    rows: Iterable[Iterable[Any]],
+    max_features: int | None = 1000,
+    feature_prefix: str = "embedding",
+    keep_genome_ids: set[str] | None = None,
+) -> FeatureMatrix:
+    """Convert dense embedding rows into median-binarized feature dimensions."""
+
+    genome_ids = [_id(value) for value in bacdive_ids]
+    dense_rows = [[_numeric(cell) for cell in row] for row in rows]
+    kept_row_indexes = [
+        index
+        for index, genome_id in enumerate(genome_ids)
+        if genome_id and (keep_genome_ids is None or genome_id in keep_genome_ids)
+    ]
+    if not kept_row_indexes:
+        raise ValueError("legacy dense matrix contains no selected genomes")
+    n_features = len(dense_rows[kept_row_indexes[0]])
+    variances = []
+    for feature_index in range(n_features):
+        values = [dense_rows[row_index][feature_index] for row_index in kept_row_indexes]
+        mean = sum(values) / len(values)
+        variance = sum((value - mean) ** 2 for value in values) / len(values)
+        variances.append((feature_index, variance))
+    variances.sort(key=lambda item: (-item[1], item[0]))
+    if max_features is not None:
+        variances = variances[:max_features]
+    selected_indexes = sorted(index for index, _variance in variances)
+    medians = {
+        feature_index: _median([dense_rows[row_index][feature_index] for row_index in kept_row_indexes])
+        for feature_index in selected_indexes
+    }
+
+    return FeatureMatrix(
+        genome_ids=[genome_ids[index] for index in kept_row_indexes],
+        feature_names=[f"{feature_prefix}:dim_{feature_index:04d}_gt_median" for feature_index in selected_indexes],
+        rows=[
+            [1 if dense_rows[row_index][feature_index] > medians[feature_index] else 0 for feature_index in selected_indexes]
+            for row_index in kept_row_indexes
+        ],
+    )
+
+
+def load_legacy_dense_npz_feature_matrix(
+    npz_path: Path,
+    *,
+    max_features: int | None = 1000,
+    feature_prefix: str = "embedding",
+    keep_genome_ids: set[str] | None = None,
+) -> FeatureMatrix:
+    """Load dense legacy embedding `.npz` arrays and median-binarize dimensions."""
+
+    try:
+        import numpy as np  # type: ignore[import-not-found]
+    except ImportError as exc:
+        raise RuntimeError("legacy dense NPZ import requires optional dependency: numpy") from exc
+
+    data = np.load(npz_path, allow_pickle=True)
+    bacdive_ids = [_id(value) for value in data["bacdive_ids"].tolist()]
+    matrix = data["features"]
+    kept_row_indexes = [
+        index
+        for index, genome_id in enumerate(bacdive_ids)
+        if genome_id and (keep_genome_ids is None or genome_id in keep_genome_ids)
+    ]
+    if not kept_row_indexes:
+        raise ValueError("legacy dense matrix contains no selected genomes")
+    selected_rows = matrix[kept_row_indexes]
+    variances = selected_rows.var(axis=0)
+    ranked = sorted(enumerate(variances.tolist()), key=lambda item: (-item[1], item[0]))
+    if max_features is not None:
+        ranked = ranked[:max_features]
+    selected_indexes = sorted(index for index, _variance in ranked)
+    medians = np.median(selected_rows[:, selected_indexes], axis=0)
+    binary_rows = (selected_rows[:, selected_indexes] > medians).astype(int)
+    return FeatureMatrix(
+        genome_ids=[bacdive_ids[index] for index in kept_row_indexes],
+        feature_names=[f"{feature_prefix}:dim_{index:04d}_gt_median" for index in selected_indexes],
+        rows=binary_rows.tolist(),
+    )
+
+
 def load_legacy_npz_feature_matrix(
     npz_path: Path,
     vocab_path: Path,
@@ -321,6 +405,14 @@ def _numeric(value: Any) -> float:
         return float(value)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _median(values: list[float]) -> float:
+    ordered = sorted(values)
+    midpoint = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[midpoint]
+    return (ordered[midpoint - 1] + ordered[midpoint]) / 2
 
 
 def _is_missing(value: Any) -> bool:
