@@ -109,6 +109,10 @@ PYTHONPATH=src python3 -m microbial_function_discovery.cli import-domtblout exam
 PYTHONPATH=src python3 -m microbial_function_discovery.cli run-eggnog examples/useful_functions.faa --output-dir outputs/eggnog
 PYTHONPATH=src python3 -m microbial_function_discovery.cli run-domtblout examples/useful_functions.faa --hmm /path/to/Pfam-A.hmm --out outputs/pfam.domtblout --database Pfam
 PYTHONPATH=src python3 -m microbial_function_discovery.cli predict-annotations examples/annotation_hits.tsv --genome-id candidate_001
+PYTHONPATH=src python3 -m microbial_function_discovery.cli validate-splits examples/benchmark_labels.tsv
+PYTHONPATH=src python3 -m microbial_function_discovery.cli build-features examples/multi_genome_annotation_hits.tsv --out outputs/features.json
+PYTHONPATH=src python3 -m microbial_function_discovery.cli train-baseline outputs/features.json examples/benchmark_labels.tsv --out outputs/model.json
+PYTHONPATH=src python3 -m microbial_function_discovery.cli evaluate outputs/model.json outputs/features.json examples/benchmark_labels.tsv --split test
 PYTHONPATH=src python3 -m microbial_function_discovery.cli validate examples/prediction.example.json
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
@@ -124,6 +128,10 @@ mfd import-domtblout examples/pfam.domtblout --database Pfam
 mfd run-eggnog examples/useful_functions.faa --output-dir outputs/eggnog
 mfd run-domtblout examples/useful_functions.faa --hmm /path/to/Pfam-A.hmm --out outputs/pfam.domtblout --database Pfam
 mfd predict-annotations examples/annotation_hits.tsv --genome-id candidate_001
+mfd validate-splits examples/benchmark_labels.tsv
+mfd build-features examples/multi_genome_annotation_hits.tsv --out outputs/features.json
+mfd train-baseline outputs/features.json examples/benchmark_labels.tsv --out outputs/model.json
+mfd evaluate outputs/model.json outputs/features.json examples/benchmark_labels.tsv --split test
 mfd validate examples/prediction.example.json
 ```
 
@@ -160,3 +168,30 @@ The runner commands skip existing non-empty output files unless `--force` is
 provided. This is intentionally CPU-first and cache-friendly, reusing the
 annotation strategy from the earlier `microbe-foundation` work instead of
 starting with expensive GPU embedding runs.
+
+## No-GPU Benchmark Baseline
+
+The first learned baseline uses binary annotation-accession features and a
+simple per-label classifier:
+
+```bash
+mfd validate-splits examples/benchmark_labels.tsv
+mfd build-features examples/multi_genome_annotation_hits.tsv --out outputs/features.json
+mfd train-baseline outputs/features.json examples/benchmark_labels.tsv --out outputs/model.json
+mfd evaluate outputs/model.json outputs/features.json examples/benchmark_labels.tsv --split test
+```
+
+Label TSV format:
+
+```text
+genome_id	split	family	panel	label	value
+G1	train	FamilyA	biofuels_industrial	cellulose_degradation	1
+G3	test	FamilyB	biofuels_industrial	cellulose_degradation	1
+```
+
+Feature input is the normalized multi-genome annotation TSV:
+
+```text
+genome_id	protein_id	database	accession	name	evalue
+G1	p1	CAZy	GH5	glycoside hydrolase family 5 cellulase	1e-40
+```

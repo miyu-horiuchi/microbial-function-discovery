@@ -1,0 +1,9 @@
+genome_id	split	family	panel	label	value
+G1	train	FamilyA	biofuels_industrial	cellulose_degradation	1
+G2	train	FamilyA	biofuels_industrial	cellulose_degradation	0
+G3	test	FamilyB	biofuels_industrial	cellulose_degradation	1
+G4	test	FamilyB	biofuels_industrial	cellulose_degradation	0
+G1	train	FamilyA	environmental_terraforming	nitrogen_fixation	1
+G2	train	FamilyA	environmental_terraforming	nitrogen_fixation	0
+G3	test	FamilyB	environmental_terraforming	nitrogen_fixation	1
+G4	test	FamilyB	environmental_terraforming	nitrogen_fixation	0

@@ -199,6 +199,80 @@ class CliTests(unittest.TestCase):
 
         self.assertIn("p1\tPfam\tPF00150.20", result.stdout)
 
+    def test_validate_splits_command_accepts_family_holdout_labels(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "microbial_function_discovery.cli",
+                "validate-splits",
+                "examples/benchmark_labels.tsv",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertIn("family holdout valid", result.stdout)
+
+    def test_build_features_train_and_evaluate_commands(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            features_path = tmp_path / "features.json"
+            model_path = tmp_path / "model.json"
+            report_path = tmp_path / "report.json"
+
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "microbial_function_discovery.cli",
+                    "build-features",
+                    "examples/multi_genome_annotation_hits.tsv",
+                    "--out",
+                    str(features_path),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "microbial_function_discovery.cli",
+                    "train-baseline",
+                    str(features_path),
+                    "examples/benchmark_labels.tsv",
+                    "--out",
+                    str(model_path),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "microbial_function_discovery.cli",
+                    "evaluate",
+                    str(model_path),
+                    str(features_path),
+                    "examples/benchmark_labels.tsv",
+                    "--split",
+                    "test",
+                    "--out",
+                    str(report_path),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            report = json.loads(report_path.read_text())
+            self.assertEqual(report["overall"]["accuracy"], 1.0)
+
 
 def _write_fake_executable(path: Path, body: str) -> Path:
     script = "#!/usr/bin/env python3\n" + textwrap.dedent(body).strip() + "\n"

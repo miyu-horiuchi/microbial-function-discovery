@@ -1,0 +1,7 @@
+genome_id	protein_id	database	accession	name	evalue
+G1	p1	CAZy	GH5	glycoside hydrolase family 5 cellulase	1e-40
+G1	p2	KEGG	K02588	nitrogenase iron protein nifH	1e-50
+G2	p1	Pfam	PF00001	hypothetical protein	1e-5
+G3	p1	CAZy	GH5	glycoside hydrolase family 5 cellulase	1e-45
+G3	p2	KEGG	K02588	nitrogenase iron protein nifH	1e-55
+G4	p1	Pfam	PF00001	hypothetical protein	1e-5

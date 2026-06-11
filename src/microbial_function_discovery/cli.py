@@ -9,7 +9,10 @@ from pathlib import Path
 
 from microbial_function_discovery.annotations import parse_annotation_hits_tsv
 from microbial_function_discovery.baseline import predict_from_annotation_hits, predict_from_fasta
+from microbial_function_discovery.datasets import FamilyLeakageError, parse_labels_tsv, validate_family_holdout
+from microbial_function_discovery.features import FeatureMatrix, build_feature_matrix_from_annotation_tsv
 from microbial_function_discovery.importers import format_annotation_hits_tsv, parse_eggnog_mapper, parse_hmmer_domtblout
+from microbial_function_discovery.learning import BaselineModel, evaluate_model, train_baseline
 from microbial_function_discovery.panels import list_panels
 from microbial_function_discovery.runners import run_eggnog_mapper, run_hmmer_domtblout
 from microbial_function_discovery.validation import PredictionValidationError, validate_prediction
@@ -79,6 +82,38 @@ def build_parser() -> argparse.ArgumentParser:
     run_domtblout_parser.add_argument("--evalue", type=float, default=1e-5, help="HMMER E-value cutoff.")
     run_domtblout_parser.add_argument("--force", action="store_true", help="Rerun even if output already exists.")
 
+    validate_splits_parser = subparsers.add_parser(
+        "validate-splits",
+        help="Validate benchmark label splits for family leakage.",
+    )
+    validate_splits_parser.add_argument("labels", type=Path, help="Path to benchmark labels TSV.")
+
+    build_features_parser = subparsers.add_parser(
+        "build-features",
+        help="Build binary annotation feature matrix JSON.",
+    )
+    build_features_parser.add_argument("annotations", type=Path, help="Path to multi-genome annotation TSV.")
+    build_features_parser.add_argument("--out", type=Path, required=True, help="Output feature matrix JSON.")
+
+    train_parser = subparsers.add_parser(
+        "train-baseline",
+        help="Train a no-GPU baseline model from features and labels.",
+    )
+    train_parser.add_argument("features", type=Path, help="Path to feature matrix JSON.")
+    train_parser.add_argument("labels", type=Path, help="Path to benchmark labels TSV.")
+    train_parser.add_argument("--out", type=Path, required=True, help="Output model JSON.")
+    train_parser.add_argument("--train-split", default="train", help="Split to train on.")
+
+    evaluate_parser = subparsers.add_parser(
+        "evaluate",
+        help="Evaluate a trained baseline model.",
+    )
+    evaluate_parser.add_argument("model", type=Path, help="Path to model JSON.")
+    evaluate_parser.add_argument("features", type=Path, help="Path to feature matrix JSON.")
+    evaluate_parser.add_argument("labels", type=Path, help="Path to benchmark labels TSV.")
+    evaluate_parser.add_argument("--split", default="test", help="Split to evaluate.")
+    evaluate_parser.add_argument("--out", type=Path, default=None, help="Optional output report JSON.")
+
     return parser
 
 
@@ -102,6 +137,14 @@ def main(argv: list[str] | None = None) -> int:
         return _run_eggnog(args)
     if args.command == "run-domtblout":
         return _run_domtblout(args)
+    if args.command == "validate-splits":
+        return _validate_splits(args.labels)
+    if args.command == "build-features":
+        return _build_features(args.annotations, args.out)
+    if args.command == "train-baseline":
+        return _train_baseline(args.features, args.labels, args.out, args.train_split)
+    if args.command == "evaluate":
+        return _evaluate(args.model, args.features, args.labels, args.split, args.out)
 
     parser.error(f"unknown command: {args.command}")
     return 2
@@ -247,6 +290,79 @@ def _run_domtblout(args: argparse.Namespace) -> int:
         return 1
 
     print(format_annotation_hits_tsv(hits), end="")
+    return 0
+
+
+def _validate_splits(labels_path: Path) -> int:
+    try:
+        labels = parse_labels_tsv(labels_path.read_text())
+        validate_family_holdout(labels)
+    except FileNotFoundError:
+        print(f"{labels_path}: file not found", file=sys.stderr)
+        return 1
+    except (ValueError, FamilyLeakageError) as exc:
+        print(f"{labels_path}: invalid split file: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"{labels_path}: family holdout valid")
+    return 0
+
+
+def _build_features(annotations_path: Path, out_path: Path) -> int:
+    try:
+        features = build_feature_matrix_from_annotation_tsv(annotations_path.read_text())
+    except FileNotFoundError:
+        print(f"{annotations_path}: file not found", file=sys.stderr)
+        return 1
+    except ValueError as exc:
+        print(f"{annotations_path}: invalid annotation TSV: {exc}", file=sys.stderr)
+        return 1
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(features.to_json())
+    print(f"wrote {len(features.genome_ids)} genomes x {len(features.feature_names)} features to {out_path}")
+    return 0
+
+
+def _train_baseline(features_path: Path, labels_path: Path, out_path: Path, train_split: str) -> int:
+    try:
+        features = FeatureMatrix.from_json(features_path.read_text())
+        labels = parse_labels_tsv(labels_path.read_text())
+        validate_family_holdout(labels)
+        model = train_baseline(features, labels, train_split=train_split)
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except (ValueError, FamilyLeakageError, KeyError) as exc:
+        print(f"cannot train baseline: {exc}", file=sys.stderr)
+        return 1
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(model.to_json())
+    print(f"wrote {len(model.targets)} target models to {out_path}")
+    return 0
+
+
+def _evaluate(model_path: Path, features_path: Path, labels_path: Path, split: str, out_path: Path | None) -> int:
+    try:
+        model = BaselineModel.from_json(model_path.read_text())
+        features = FeatureMatrix.from_json(features_path.read_text())
+        labels = parse_labels_tsv(labels_path.read_text())
+        report = evaluate_model(model, features, labels, split=split)
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except (ValueError, KeyError) as exc:
+        print(f"cannot evaluate baseline: {exc}", file=sys.stderr)
+        return 1
+
+    text = json.dumps(report, indent=2, sort_keys=True)
+    if out_path is not None:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(text)
+        print(f"wrote evaluation report to {out_path}")
+    else:
+        print(text)
     return 0
 
 
