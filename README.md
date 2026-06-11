@@ -97,3 +97,20 @@ attribution, and the predictability-gradient paper.
 - [Model roadmap](docs/model-roadmap.md)
 - [Prediction output schema](schemas/prediction.schema.json)
 
+## Developer Quickstart
+
+Run the scaffold without installing dependencies:
+
+```bash
+PYTHONPATH=src python3 -m microbial_function_discovery.cli panels
+PYTHONPATH=src python3 -m microbial_function_discovery.cli validate examples/prediction.example.json
+PYTHONPATH=src python3 -m unittest discover -s tests -v
+```
+
+Install the local CLI:
+
+```bash
+python3 -m pip install -e .
+mfd panels
+mfd validate examples/prediction.example.json
+```

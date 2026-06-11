@@ -1,0 +1,58 @@
+{
+  "genome_id": "candidate_001",
+  "application_scores": [
+    {
+      "area": "biofuels_industrial",
+      "score": 0.82,
+      "confidence": 0.71,
+      "top_functions": [
+        "cellulose degradation",
+        "thermostable glycoside hydrolases"
+      ]
+    },
+    {
+      "area": "biosafety",
+      "score": 0.09,
+      "confidence": 0.64,
+      "top_functions": [
+        "low pathogenicity signal",
+        "low AMR signal"
+      ]
+    }
+  ],
+  "functions": [
+    {
+      "name": "cellulose degradation",
+      "score": 0.88,
+      "confidence": 0.75,
+      "evidence": [
+        {
+          "type": "protein",
+          "id": "protein_123",
+          "annotation": "GH5 glycoside hydrolase",
+          "database": "CAZy",
+          "weight": 0.31
+        },
+        {
+          "type": "pathway",
+          "id": "cazy_cellulase_module",
+          "annotation": "cellulose-active enzyme cluster",
+          "database": "CAZy",
+          "status": "partial"
+        }
+      ]
+    }
+  ],
+  "biosafety": {
+    "pathogenicity_risk": 0.12,
+    "amr_risk": 0.08,
+    "warnings": []
+  },
+  "novelty": {
+    "nearest_training_family": "unknown_or_distant",
+    "generalization_risk": "high",
+    "notes": [
+      "Prediction should be validated experimentally because the genome is taxonomically distant from training labels."
+    ]
+  }
+}
