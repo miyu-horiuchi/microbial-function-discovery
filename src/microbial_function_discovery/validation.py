@@ -136,6 +136,6 @@ def _require_string(value: Any, path: str) -> str:
 
 
 def _require_probability(value: Any, path: str) -> float:
-    if not isinstance(value, int | float) or isinstance(value, bool) or not 0 <= value <= 1:
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or not 0 <= value <= 1:
         raise PredictionValidationError(f"{path} must be a number from 0 to 1")
     return float(value)
