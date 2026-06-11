@@ -10,6 +10,7 @@ from typing import Any
 from microbial_function_discovery.datasets import LabelRecord
 from microbial_function_discovery.features import FeatureMatrix
 from microbial_function_discovery.learning import BaselineModel
+from microbial_function_discovery.novelty import AnnotationNoveltyReference
 
 
 TAXONOMY_FIELDS = ["domain", "phylum", "class", "order", "family", "genus", "species", "type_strain"]
@@ -33,6 +34,7 @@ SAFE_LEAD_FIELDS = [
     "risk_level",
     "biosafety_flags",
     "evidence",
+    "novelty_level",
 ]
 
 
@@ -54,6 +56,8 @@ def annotate_discovery_candidates(
         for row in accession_rows
         if _id(row.get("bacdive_id"))
     }
+    novelty_ref = _build_novelty_reference(labels, annotation_features)
+    present_ids = set(annotation_features.genome_ids)
     annotated_targets = []
     for target in candidate_report.get("targets", []):
         target_key = str(target.get("target_key", ""))
@@ -74,6 +78,7 @@ def annotate_discovery_candidates(
                         annotation_model,
                         annotation_features,
                     ),
+                    "novelty": _novelty(genome_id, novelty_ref, present_ids, annotation_features),
                     "evidence": _candidate_evidence(
                         genome_id,
                         target_key,
@@ -117,8 +122,8 @@ def render_discovery_candidate_report(annotated_report: dict[str, Any], *, max_t
         "",
         "## Top Candidates",
         "",
-        "| Target | Rank | Genome | Species | Source | Score | Safety | Evidence |",
-        "|---|---:|---|---|---|---:|---|---|",
+        "| Target | Rank | Genome | Species | Source | Score | Safety | Novelty | Evidence |",
+        "|---|---:|---|---|---|---:|---|---|---|",
     ]
     for target in annotated_report.get("targets", [])[:max_targets]:
         for candidate in target.get("candidates", [])[:1]:
@@ -136,6 +141,7 @@ def render_discovery_candidate_report(annotated_report: dict[str, Any], *, max_t
                         str(target.get("source", "")),
                         _format_score(candidate.get("score")),
                         str(candidate.get("biosafety", {}).get("risk_level", "unknown")),
+                        str(candidate.get("novelty", {}).get("level", "unknown")),
                         _markdown_cell(evidence_text),
                     ]
                 )
@@ -150,6 +156,7 @@ def render_discovery_candidate_report(annotated_report: dict[str, Any], *, max_t
             "- These are ranked benchmark candidates, not wet-lab validated recommendations.",
             "- Safety flags combine known BacDive fields with annotation-baseline biosafety scores when available.",
             "- Evidence lists active annotation features with positive target weights; dense-only leads may have limited feature evidence.",
+            "- Novelty = how unlike the training set a candidate is (annotation-feature Jaccard distance); it is a representativeness signal, NOT a confidence or correctness estimate.",
             "",
         ]
     )
@@ -236,8 +243,8 @@ def render_safe_leads_report(export: dict[str, Any], *, max_leads: int = 10) -> 
         "",
         "## Leads",
         "",
-        "| Panel | Target | Genome | Species | Accession | Score | Risk | Evidence |",
-        "|---|---|---|---|---|---:|---|---|",
+        "| Panel | Target | Genome | Species | Accession | Score | Risk | Novelty | Evidence |",
+        "|---|---|---|---|---|---:|---|---|---|",
     ]
     for lead in export.get("leads", [])[:max_leads]:
         lines.append(
@@ -251,6 +258,7 @@ def render_safe_leads_report(export: dict[str, Any], *, max_leads: int = 10) -> 
                     _markdown_cell(lead.get("accession")),
                     _format_score(lead.get("score")),
                     _markdown_cell(lead.get("risk_level")),
+                    _markdown_cell(lead.get("novelty_level")),
                     _markdown_cell(lead.get("evidence")),
                 ]
             )
@@ -267,7 +275,8 @@ def render_safe_leads_report(export: dict[str, Any], *, max_leads: int = 10) -> 
             lines.append(
                 f"- `{lead.get('target_key', '')}`: {lead.get('species') or lead.get('genus') or 'unknown'} "
                 f"({lead.get('genome_id')}, {lead.get('accession')}) "
-                f"score={_format_score(lead.get('score'))}, risk={lead.get('risk_level')}"
+                f"score={_format_score(lead.get('score'))}, risk={lead.get('risk_level')}, "
+                f"novelty={lead.get('novelty_level')}"
             )
         lines.append("")
     lines.extend(
@@ -277,6 +286,7 @@ def render_safe_leads_report(export: dict[str, Any], *, max_leads: int = 10) -> 
             "",
             "- These leads are benchmark-derived shortlists for review, not recommendations for release or deployment.",
             "- Wet-lab triage should verify biosafety, taxonomy, culturing feasibility, and functional assay design.",
+            "- Novelty = how unlike the training set a candidate is (annotation-feature Jaccard distance); it is a representativeness signal, NOT a confidence or correctness estimate.",
             "",
         ]
     )
@@ -425,6 +435,28 @@ def _candidate_evidence(
     return evidence[: max(limit, 1)]
 
 
+def _build_novelty_reference(labels: list[LabelRecord], features: FeatureMatrix):
+    """Reference = split=="train" labeled genomes (fall back to all labels)."""
+    train_ids = [rec.genome_id for rec in labels if getattr(rec, "split", "") == "train"]
+    if not train_ids:
+        train_ids = [rec.genome_id for rec in labels]
+    try:
+        return AnnotationNoveltyReference().fit(features, train_ids)
+    except ValueError:
+        return None
+
+
+def _novelty(genome_id: str, novelty_ref, present_ids: set, features: FeatureMatrix) -> dict[str, Any]:
+    if novelty_ref is None or genome_id not in present_ids:
+        return {"score": None, "level": "unknown", "ref_percentile": None}
+    score = novelty_ref.score(features.row_for(genome_id))
+    return {
+        "score": round(score, 6),
+        "level": novelty_ref.level(score),
+        "ref_percentile": round(novelty_ref.ref_percentile(score), 6),
+    }
+
+
 def _lead_row(target: dict[str, Any], candidate: dict[str, Any], target_precision: float) -> dict[str, Any]:
     taxonomy = candidate.get("taxonomy", {})
     accession = candidate.get("genome_accession", {})
@@ -445,6 +477,7 @@ def _lead_row(target: dict[str, Any], candidate: dict[str, Any], target_precisio
         "risk_level": str(biosafety.get("risk_level", "unknown")),
         "biosafety_flags": ",".join(str(flag) for flag in biosafety.get("flags", [])),
         "evidence": ";".join(str(item.get("id", "")) for item in candidate.get("evidence", []) if item.get("id")),
+        "novelty_level": str(candidate.get("novelty", {}).get("level", "unknown")),
     }
 
 
