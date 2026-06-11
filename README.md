@@ -94,6 +94,7 @@ attribution, and the predictability-gradient paper.
 ## Initial Documents
 
 - [Benchmark protocol](docs/benchmark.md)
+- [Discovery candidate report](docs/discovery-candidate-report.md)
 - [Legacy baseline comparison](docs/legacy-baseline-comparison.md)
 - [Model roadmap](docs/model-roadmap.md)
 - [Prediction output schema](schemas/prediction.schema.json)
@@ -287,7 +288,8 @@ per target instead of assuming one global model wins every application.
 The all-target validation-selected leaderboard evaluates 103 targets and finds
 37 where dense or fusion beats annotation. It also emits top held-out discovery
 candidate rankings for 25 high-precision targets. See
-[Target leaderboard](docs/target-leaderboard.md).
+[Target leaderboard](docs/target-leaderboard.md) and
+[Discovery candidate report](docs/discovery-candidate-report.md).
 
 This is a CPU baseline and a data-integration check, not the final foundation
 model. The next model step is calibration: validate the selected fusion weights

@@ -16,6 +16,8 @@ Raw outputs:
 
 - `data/legacy/target_leaderboard.json`
 - `data/legacy/discovery_candidates.top_targets.json`
+- `data/legacy/discovery_candidates.annotated.json`
+- [Discovery candidate report](discovery-candidate-report.md)
 
 ## Summary
 
@@ -94,6 +96,11 @@ These genome IDs are ranked held-out benchmark candidates, not wet-lab validated
 recommendations. The next product step is to attach taxonomy, source metadata,
 biosafety filters, and evidence features before treating any row as an
 experimental lead.
+
+That product step is now started in
+[Discovery candidate report](discovery-candidate-report.md), which annotates the
+top candidates with BacDive taxonomy, genome accessions, evidence features, and
+biosafety flags.
 
 ## Reproduction
 

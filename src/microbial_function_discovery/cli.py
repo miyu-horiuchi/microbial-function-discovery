@@ -18,6 +18,11 @@ from microbial_function_discovery.dense_learning import (
     load_dense_npz_feature_matrix,
     train_dense_baseline,
 )
+from microbial_function_discovery.discovery import (
+    annotate_discovery_candidates,
+    render_discovery_candidate_report,
+    to_json,
+)
 from microbial_function_discovery.features import FeatureMatrix, build_feature_matrix_from_annotation_tsv
 from microbial_function_discovery.fusion import (
     evaluate_fusion_leaderboard,
@@ -349,6 +354,20 @@ def build_parser() -> argparse.ArgumentParser:
     discovery_parser.add_argument("--max-targets", type=int, default=None, help="Maximum targets to include.")
     discovery_parser.add_argument("--out", type=Path, default=None, help="Optional output candidates JSON.")
 
+    annotate_candidates_parser = subparsers.add_parser(
+        "annotate-discovery-candidates",
+        help="Attach taxonomy, accessions, evidence, and biosafety flags to discovery candidate rankings.",
+    )
+    annotate_candidates_parser.add_argument("candidates", type=Path, help="Path to discovery candidates JSON.")
+    annotate_candidates_parser.add_argument("traits", type=Path, help="Legacy traits table, CSV/TSV/parquet.")
+    annotate_candidates_parser.add_argument("model", type=Path, help="Path to annotation model JSON.")
+    annotate_candidates_parser.add_argument("features", type=Path, help="Path to annotation feature matrix JSON.")
+    annotate_candidates_parser.add_argument("labels", type=Path, help="Path to benchmark labels TSV.")
+    annotate_candidates_parser.add_argument("--accessions", type=Path, default=None, help="Optional genome accessions TSV/CSV/parquet.")
+    annotate_candidates_parser.add_argument("--evidence-limit", type=int, default=5, help="Maximum evidence rows per candidate.")
+    annotate_candidates_parser.add_argument("--out", type=Path, required=True, help="Output annotated candidate JSON.")
+    annotate_candidates_parser.add_argument("--report-out", type=Path, default=None, help="Optional Markdown report output.")
+
     predict_baseline_parser = subparsers.add_parser(
         "predict-baseline",
         help="Emit product-style prediction JSON from a trained baseline model.",
@@ -476,6 +495,18 @@ def main(argv: list[str] | None = None) -> int:
             args.precision_k,
             args.max_targets,
             args.out,
+        )
+    if args.command == "annotate-discovery-candidates":
+        return _annotate_discovery_candidates(
+            args.candidates,
+            args.traits,
+            args.model,
+            args.features,
+            args.labels,
+            args.accessions,
+            args.evidence_limit,
+            args.out,
+            args.report_out,
         )
     if args.command == "predict-baseline":
         return _predict_baseline(args.model, args.features, args.genome_id)
@@ -1083,6 +1114,50 @@ def _rank_discovery_candidates(
         return 1
 
     _write_or_print_json(report, out_path, f"wrote discovery candidate rankings to {out_path}" if out_path else "")
+    return 0
+
+
+def _annotate_discovery_candidates(
+    candidates_path: Path,
+    traits_path: Path,
+    model_path: Path,
+    features_path: Path,
+    labels_path: Path,
+    accessions_path: Path | None,
+    evidence_limit: int,
+    out_path: Path,
+    report_out_path: Path | None,
+) -> int:
+    try:
+        candidates = json.loads(candidates_path.read_text())
+        trait_rows = load_table_records(traits_path)
+        accession_rows = load_table_records(accessions_path) if accessions_path is not None else []
+        model = BaselineModel.from_json(model_path.read_text())
+        features = FeatureMatrix.from_json(features_path.read_text())
+        labels = parse_labels_tsv(labels_path.read_text())
+        annotated = annotate_discovery_candidates(
+            candidates,
+            trait_rows,
+            accession_rows,
+            model,
+            features,
+            labels,
+            evidence_limit=evidence_limit,
+        )
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except (RuntimeError, ValueError, KeyError, json.JSONDecodeError) as exc:
+        print(f"cannot annotate discovery candidates: {exc}", file=sys.stderr)
+        return 1
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(to_json(annotated))
+    print(f"wrote annotated discovery candidates to {out_path}")
+    if report_out_path is not None:
+        report_out_path.parent.mkdir(parents=True, exist_ok=True)
+        report_out_path.write_text(render_discovery_candidate_report(annotated))
+        print(f"wrote discovery candidate report to {report_out_path}")
     return 0
 
 

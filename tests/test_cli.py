@@ -584,6 +584,92 @@ class CliTests(unittest.TestCase):
         self.assertEqual(leaderboard["targets"][0]["best_source"], "dense")
         self.assertEqual(leaderboard["targets"][0]["test_metrics"]["precision_at_1"], 1.0)
 
+    def test_annotate_discovery_candidates_command_writes_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            features_path = tmp_path / "features.json"
+            labels_path = tmp_path / "labels.tsv"
+            model_path = tmp_path / "model.json"
+            candidates_path = tmp_path / "candidates.json"
+            traits_path = tmp_path / "traits.tsv"
+            accessions_path = tmp_path / "accessions.tsv"
+            out_path = tmp_path / "annotated.json"
+            report_path = tmp_path / "report.md"
+
+            labels_path.write_text(
+                "genome_id\tsplit\tfamily\tpanel\tlabel\tvalue\n"
+                "G1\ttrain\tFamilyA\tbiofuels_industrial\tcellulose_degradation\t1\n"
+                "G2\ttrain\tFamilyA\tbiofuels_industrial\tcellulose_degradation\t0\n"
+                "G1\ttrain\tFamilyA\tbiosafety\tpathogenicity_human\t0\n"
+                "G2\ttrain\tFamilyA\tbiosafety\tpathogenicity_human\t1\n"
+                "G3\ttest\tFamilyB\tbiofuels_industrial\tcellulose_degradation\t1\n"
+                "G3\ttest\tFamilyB\tbiosafety\tpathogenicity_human\t0\n"
+            )
+            labels = parse_labels_tsv(labels_path.read_text())
+            features = build_feature_matrix_from_annotation_tsv(
+                "genome_id\tprotein_id\tdatabase\taccession\tname\tevalue\n"
+                "G1\tp1\tCAZy\tGH5\tcellulase\t1e-20\n"
+                "G2\tp1\tPfam\tPF00002\tnegative marker\t1e-20\n"
+                "G3\tp1\tCAZy\tGH5\tcandidate cellulase\t1e-20\n"
+            )
+            features_path.write_text(features.to_json())
+            model_path.write_text(train_baseline(features, labels).to_json())
+            candidates_path.write_text(
+                json.dumps(
+                    {
+                        "split": "test",
+                        "targets": [
+                            {
+                                "target_key": "biofuels_industrial:cellulose_degradation",
+                                "panel": "biofuels_industrial",
+                                "label": "cellulose_degradation",
+                                "source": "annotation",
+                                "metrics": {"precision_at_10": 1.0},
+                                "candidates": [{"genome_id": "G3", "rank": 1, "score": 0.9, "truth": 1}],
+                            }
+                        ],
+                    }
+                )
+            )
+            traits_path.write_text(
+                "bacdive_id\tdomain\tfamily\tgenus\tspecies\tbiosafety_level\tpathogenicity_human\tpathogenicity_animal\n"
+                "G3\tBacteria\tCandidateaceae\tCandidateus\tCandidateus utilis\tBSL-1\tFalse\tFalse\n"
+            )
+            accessions_path.write_text(
+                "bacdive_id\taccession\tassembly_level\tdescription\n"
+                "G3\tGCA_000000003\tcomplete\tCandidateus utilis assembly\n"
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "microbial_function_discovery.cli",
+                    "annotate-discovery-candidates",
+                    str(candidates_path),
+                    str(traits_path),
+                    str(model_path),
+                    str(features_path),
+                    str(labels_path),
+                    "--accessions",
+                    str(accessions_path),
+                    "--out",
+                    str(out_path),
+                    "--report-out",
+                    str(report_path),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            annotated = json.loads(out_path.read_text())
+            report = report_path.read_text()
+
+        self.assertIn("wrote annotated discovery candidates", result.stdout)
+        self.assertEqual(annotated["targets"][0]["candidates"][0]["taxonomy"]["species"], "Candidateus utilis")
+        self.assertIn("Candidateus utilis", report)
+
 
 def _write_fake_executable(path: Path, body: str) -> Path:
     script = "#!/usr/bin/env python3\n" + textwrap.dedent(body).strip() + "\n"
