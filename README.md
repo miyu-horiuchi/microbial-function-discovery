@@ -164,12 +164,24 @@ mfd import-legacy-eggnog-features \
 mfd train-baseline data/legacy/features.1000.json data/legacy/labels.tsv --out data/legacy/model.1000.json
 mfd evaluate data/legacy/model.1000.json data/legacy/features.1000.json data/legacy/labels.tsv --split test --out data/legacy/eval.test.1000.json
 mfd evaluate-ranking data/legacy/model.1000.json data/legacy/features.1000.json data/legacy/labels.tsv --split test --target biofuels_industrial:temperature_class__thermophile --k 10 --k 50
-mfd import-legacy-dense-features \
+mfd train-dense-baseline \
   /Users/miyuhoriuchi/microbe-foundation/data/esm2_features.npz \
-  --labels data/legacy/labels.tsv \
-  --out data/legacy/features.esm2.json \
-  --max-features 640 \
-  --feature-prefix ESM2
+  data/legacy/labels.tsv \
+  --out data/legacy/dense_model.esm2.json \
+  --max-features 640
+mfd evaluate-dense \
+  data/legacy/dense_model.esm2.json \
+  /Users/miyuhoriuchi/microbe-foundation/data/esm2_features.npz \
+  data/legacy/labels.tsv \
+  --split test \
+  --out data/legacy/dense_eval.test.esm2.json
+mfd evaluate-dense-ranking \
+  data/legacy/dense_model.esm2.json \
+  /Users/miyuhoriuchi/microbe-foundation/data/esm2_features.npz \
+  data/legacy/labels.tsv \
+  --split test \
+  --target biofuels_industrial:temperature_class__thermophile \
+  --k 10 --k 50
 ```
 
 The current `predict` command is a transparent annotation-keyword baseline. It
@@ -259,11 +271,12 @@ Initial family-held-out test result:
 - human pathogenicity ranking: precision@10 = 0.00, precision@50 = 0.16
 
 Cached ESM2, BacFormer, ESM2+BacFormer, and hybrid-v3 feature files have also
-been imported and evaluated. Current comparison: eggNOG remains stronger for
-broad held-out classification, while BacFormer improves human pathogenicity
-precision@50. See [Legacy baseline comparison](docs/legacy-baseline-comparison.md).
+been evaluated with both median-binarized and direct dense heads. Current
+comparison: eggNOG remains stronger for broad held-out classification, but
+direct BacFormer and ESM2+BacFormer heads beat eggNOG on thermophile ranking.
+See [Legacy baseline comparison](docs/legacy-baseline-comparison.md).
 
 This is a CPU baseline and a data-integration check, not the final foundation
-model. The next model step is a dense-feature learner for embeddings, then a
-shared genome encoder only if embeddings beat the eggNOG baseline on priority
-targets.
+model. The next model step is target-specific fusion: combine eggNOG evidence
+with direct dense embeddings and only advance to a shared genome encoder for
+targets where embeddings show lift over annotation-only features.

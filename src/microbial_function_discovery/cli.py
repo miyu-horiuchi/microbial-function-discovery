@@ -10,6 +10,13 @@ from pathlib import Path
 from microbial_function_discovery.annotations import parse_annotation_hits_tsv
 from microbial_function_discovery.baseline import predict_from_annotation_hits, predict_from_fasta
 from microbial_function_discovery.datasets import FamilyLeakageError, parse_labels_tsv, validate_family_holdout
+from microbial_function_discovery.dense_learning import (
+    DenseBaselineModel,
+    evaluate_dense_model,
+    evaluate_dense_ranking,
+    load_dense_npz_feature_matrix,
+    train_dense_baseline,
+)
 from microbial_function_discovery.features import FeatureMatrix, build_feature_matrix_from_annotation_tsv
 from microbial_function_discovery.importers import format_annotation_hits_tsv, parse_eggnog_mapper, parse_hmmer_domtblout
 from microbial_function_discovery.legacy_import import (
@@ -164,6 +171,16 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--out", type=Path, required=True, help="Output model JSON.")
     train_parser.add_argument("--train-split", default="train", help="Split to train on.")
 
+    train_dense_parser = subparsers.add_parser(
+        "train-dense-baseline",
+        help="Train a direct dense-embedding baseline model from a legacy NPZ.",
+    )
+    train_dense_parser.add_argument("npz", type=Path, help="Dense feature NPZ with bacdive_ids/features.")
+    train_dense_parser.add_argument("labels", type=Path, help="Path to benchmark labels TSV.")
+    train_dense_parser.add_argument("--out", type=Path, required=True, help="Output dense model JSON.")
+    train_dense_parser.add_argument("--train-split", default="train", help="Split to train on.")
+    train_dense_parser.add_argument("--max-features", type=int, default=None, help="Optional high-variance dimensions to keep.")
+
     evaluate_parser = subparsers.add_parser(
         "evaluate",
         help="Evaluate a trained baseline model.",
@@ -173,6 +190,16 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_parser.add_argument("labels", type=Path, help="Path to benchmark labels TSV.")
     evaluate_parser.add_argument("--split", default="test", help="Split to evaluate.")
     evaluate_parser.add_argument("--out", type=Path, default=None, help="Optional output report JSON.")
+
+    evaluate_dense_parser = subparsers.add_parser(
+        "evaluate-dense",
+        help="Evaluate a direct dense-embedding baseline model.",
+    )
+    evaluate_dense_parser.add_argument("model", type=Path, help="Path to dense model JSON.")
+    evaluate_dense_parser.add_argument("npz", type=Path, help="Dense feature NPZ with bacdive_ids/features.")
+    evaluate_dense_parser.add_argument("labels", type=Path, help="Path to benchmark labels TSV.")
+    evaluate_dense_parser.add_argument("--split", default="test", help="Split to evaluate.")
+    evaluate_dense_parser.add_argument("--out", type=Path, default=None, help="Optional output report JSON.")
 
     evaluate_ranking_parser = subparsers.add_parser(
         "evaluate-ranking",
@@ -193,6 +220,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="Top-k cutoff to evaluate. Repeat for multiple cutoffs.",
     )
     evaluate_ranking_parser.add_argument("--out", type=Path, default=None, help="Optional output report JSON.")
+
+    evaluate_dense_ranking_parser = subparsers.add_parser(
+        "evaluate-dense-ranking",
+        help="Evaluate top-k candidate ranking for a dense-embedding model.",
+    )
+    evaluate_dense_ranking_parser.add_argument("model", type=Path, help="Path to dense model JSON.")
+    evaluate_dense_ranking_parser.add_argument("npz", type=Path, help="Dense feature NPZ with bacdive_ids/features.")
+    evaluate_dense_ranking_parser.add_argument("labels", type=Path, help="Path to benchmark labels TSV.")
+    evaluate_dense_ranking_parser.add_argument("--split", default="test", help="Split to evaluate.")
+    dense_ranking_group = evaluate_dense_ranking_parser.add_mutually_exclusive_group(required=True)
+    dense_ranking_group.add_argument("--target", help="Target key, e.g. biosafety:pathogenicity_human.")
+    dense_ranking_group.add_argument("--panel", help="Application panel, e.g. biosafety.")
+    evaluate_dense_ranking_parser.add_argument(
+        "--k",
+        type=int,
+        action="append",
+        default=None,
+        help="Top-k cutoff to evaluate. Repeat for multiple cutoffs.",
+    )
+    evaluate_dense_ranking_parser.add_argument("--out", type=Path, default=None, help="Optional output report JSON.")
 
     predict_baseline_parser = subparsers.add_parser(
         "predict-baseline",
@@ -268,10 +315,16 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.command == "train-baseline":
         return _train_baseline(args.features, args.labels, args.out, args.train_split)
+    if args.command == "train-dense-baseline":
+        return _train_dense_baseline(args.npz, args.labels, args.out, args.train_split, args.max_features)
     if args.command == "evaluate":
         return _evaluate(args.model, args.features, args.labels, args.split, args.out)
+    if args.command == "evaluate-dense":
+        return _evaluate_dense(args.model, args.npz, args.labels, args.split, args.out)
     if args.command == "evaluate-ranking":
         return _evaluate_ranking(args.model, args.features, args.labels, args.split, args.target, args.panel, args.k, args.out)
+    if args.command == "evaluate-dense-ranking":
+        return _evaluate_dense_ranking(args.model, args.npz, args.labels, args.split, args.target, args.panel, args.k, args.out)
     if args.command == "predict-baseline":
         return _predict_baseline(args.model, args.features, args.genome_id)
     if args.command == "rank-candidates":
@@ -570,6 +623,34 @@ def _train_baseline(features_path: Path, labels_path: Path, out_path: Path, trai
     return 0
 
 
+def _train_dense_baseline(
+    npz_path: Path,
+    labels_path: Path,
+    out_path: Path,
+    train_split: str,
+    max_features: int | None,
+) -> int:
+    try:
+        labels = parse_labels_tsv(labels_path.read_text())
+        keep_genome_ids = {record.genome_id for record in labels}
+        features = load_dense_npz_feature_matrix(npz_path, keep_genome_ids=keep_genome_ids, max_features=max_features)
+        model = train_dense_baseline(features, labels, train_split=train_split)
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except (RuntimeError, ValueError, KeyError) as exc:
+        print(f"cannot train dense baseline: {exc}", file=sys.stderr)
+        return 1
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(model.to_json())
+    print(
+        f"wrote {len(model.targets)} dense target models using "
+        f"{len(model.feature_indexes)} dimensions to {out_path}"
+    )
+    return 0
+
+
 def _evaluate(model_path: Path, features_path: Path, labels_path: Path, split: str, out_path: Path | None) -> int:
     try:
         model = BaselineModel.from_json(model_path.read_text())
@@ -588,6 +669,40 @@ def _evaluate(model_path: Path, features_path: Path, labels_path: Path, split: s
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(text)
         print(f"wrote evaluation report to {out_path}")
+    else:
+        print(text)
+    return 0
+
+
+def _evaluate_dense(
+    model_path: Path,
+    npz_path: Path,
+    labels_path: Path,
+    split: str,
+    out_path: Path | None,
+) -> int:
+    try:
+        model = DenseBaselineModel.from_json(model_path.read_text())
+        labels = parse_labels_tsv(labels_path.read_text())
+        keep_genome_ids = {record.genome_id for record in labels}
+        features = load_dense_npz_feature_matrix(
+            npz_path,
+            keep_genome_ids=keep_genome_ids,
+            feature_indexes=model.feature_indexes,
+        )
+        report = evaluate_dense_model(model, features, labels, split=split)
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except (RuntimeError, ValueError, KeyError) as exc:
+        print(f"cannot evaluate dense baseline: {exc}", file=sys.stderr)
+        return 1
+
+    text = json.dumps(report, indent=2, sort_keys=True)
+    if out_path is not None:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(text)
+        print(f"wrote dense evaluation report to {out_path}")
     else:
         print(text)
     return 0
@@ -628,6 +743,51 @@ def _evaluate_ranking(
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(text)
         print(f"wrote ranking evaluation report to {out_path}")
+    else:
+        print(text)
+    return 0
+
+
+def _evaluate_dense_ranking(
+    model_path: Path,
+    npz_path: Path,
+    labels_path: Path,
+    split: str,
+    target_key: str | None,
+    panel: str | None,
+    ks: list[int] | None,
+    out_path: Path | None,
+) -> int:
+    try:
+        model = DenseBaselineModel.from_json(model_path.read_text())
+        labels = parse_labels_tsv(labels_path.read_text())
+        keep_genome_ids = {record.genome_id for record in labels}
+        features = load_dense_npz_feature_matrix(
+            npz_path,
+            keep_genome_ids=keep_genome_ids,
+            feature_indexes=model.feature_indexes,
+        )
+        report = evaluate_dense_ranking(
+            model,
+            features,
+            labels,
+            split=split,
+            target_key=target_key,
+            panel=panel,
+            ks=ks,
+        )
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except (RuntimeError, ValueError, KeyError) as exc:
+        print(f"cannot evaluate dense ranking: {exc}", file=sys.stderr)
+        return 1
+
+    text = json.dumps(report, indent=2, sort_keys=True)
+    if out_path is not None:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(text)
+        print(f"wrote dense ranking evaluation report to {out_path}")
     else:
         print(text)
     return 0

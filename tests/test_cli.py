@@ -279,6 +279,37 @@ class CliTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("cannot import legacy dense features", result.stderr)
 
+    def test_train_dense_baseline_reports_missing_numpy_cleanly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            npz = tmp_path / "dense.npz"
+            labels = tmp_path / "labels.tsv"
+            model = tmp_path / "model.json"
+            with zipfile.ZipFile(npz, "w") as archive:
+                archive.writestr("placeholder", "")
+            labels.write_text(
+                "genome_id\tsplit\tfamily\tpanel\tlabel\tvalue\n"
+                "1\ttrain\tFamilyA\tbiofuels_industrial\tthermophile\t1\n"
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "microbial_function_discovery.cli",
+                    "train-dense-baseline",
+                    str(npz),
+                    str(labels),
+                    "--out",
+                    str(model),
+                ],
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("cannot train dense baseline", result.stderr)
+
     def test_build_features_train_and_evaluate_commands(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
