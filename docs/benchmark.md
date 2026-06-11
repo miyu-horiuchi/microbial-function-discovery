@@ -51,6 +51,11 @@ Every report should include:
 - per-protein attention baseline
 - public benchmark comparisons where labels overlap
 
+The scaffold can now import the earlier `microbe-foundation` BacDive trait
+tables and cached eggNOG feature matrices. Treat that import as the first
+reproducible CPU baseline; embedding models should beat it on the same
+family-held-out labels before GPU spend is justified.
+
 ## Application Panels
 
 The benchmark is organized into panels so the shared model can be evaluated

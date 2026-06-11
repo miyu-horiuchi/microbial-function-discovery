@@ -215,6 +215,44 @@ class CliTests(unittest.TestCase):
 
         self.assertIn("family holdout valid", result.stdout)
 
+    def test_import_legacy_labels_command_outputs_benchmark_labels(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            traits = tmp_path / "traits.tsv"
+            splits = tmp_path / "splits.tsv"
+            labels = tmp_path / "labels.tsv"
+            traits.write_text(
+                "bacdive_id\tfamily\ttemperature_class\tpathogenicity_human\n"
+                "1\tFamilyA\tthermophile\tTrue\n"
+                "2\tFamilyB\tmesophile\tFalse\n"
+            )
+            splits.write_text(
+                "bacdive_id\tfamily\tfamily_split\n"
+                "1\tFamilyA\ttrain\n"
+                "2\tFamilyB\ttest\n"
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "microbial_function_discovery.cli",
+                    "import-legacy-labels",
+                    str(traits),
+                    str(splits),
+                    "--out",
+                    str(labels),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertIn("wrote", result.stdout)
+            text = labels.read_text()
+        self.assertIn("1\ttrain\tFamilyA\tbiofuels_industrial\ttemperature_class__thermophile\t1", text)
+        self.assertIn("2\ttest\tFamilyB\tbiosafety\tpathogenicity_human\t0", text)
+
     def test_build_features_train_and_evaluate_commands(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)

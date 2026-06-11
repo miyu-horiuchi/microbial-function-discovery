@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -17,6 +17,10 @@ class FeatureMatrix:
     genome_ids: list[str]
     feature_names: list[str]
     rows: list[list[int]]
+    _row_index: dict[str, int] = field(default_factory=dict, init=False, compare=False, repr=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "_row_index", {genome_id: index for index, genome_id in enumerate(self.genome_ids)})
 
     def to_json(self) -> str:
         return json.dumps(
@@ -40,8 +44,8 @@ class FeatureMatrix:
 
     def row_for(self, genome_id: str) -> list[int]:
         try:
-            index = self.genome_ids.index(genome_id)
-        except ValueError as exc:
+            index = self._row_index[genome_id]
+        except KeyError as exc:
             raise KeyError(f"genome id not found in feature matrix: {genome_id}") from exc
         return self.rows[index]
 

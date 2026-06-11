@@ -28,7 +28,7 @@ class BaselineModel:
         target = self.targets[target_key]
         row = _align_row(features, genome_id, self.feature_names)
         logit = target.prior_log_odds + sum(value * weight for value, weight in zip(row, target.feature_log_odds))
-        return 1 / (1 + math.exp(-logit))
+        return _sigmoid(logit)
 
     def predict_label(self, target_key: str, genome_id: str, features: FeatureMatrix) -> int:
         return int(self.predict_proba(target_key, genome_id, features) >= self.targets[target_key].threshold)
@@ -72,7 +72,8 @@ class BaselineModel:
 def train_baseline(features: FeatureMatrix, labels: list[LabelRecord], *, train_split: str = "train") -> BaselineModel:
     """Train one simple Bernoulli-style linear classifier per target."""
 
-    train_labels = [record for record in labels if record.split == train_split]
+    feature_genomes = set(features.genome_ids)
+    train_labels = [record for record in labels if record.split == train_split and record.genome_id in feature_genomes]
     if not train_labels:
         raise ValueError(f"no labels found for split: {train_split}")
 
@@ -96,7 +97,12 @@ def evaluate_model(
 ) -> dict[str, Any]:
     """Evaluate a baseline model on one split."""
 
-    records = [record for record in labels if record.split == split and record.target_key in model.targets]
+    feature_genomes = set(features.genome_ids)
+    records = [
+        record
+        for record in labels
+        if record.split == split and record.target_key in model.targets and record.genome_id in feature_genomes
+    ]
     by_target: dict[str, list[dict[str, Any]]] = {}
     for record in records:
         proba = model.predict_proba(record.target_key, record.genome_id, features)
@@ -154,7 +160,13 @@ def evaluate_ranking(
         raise ValueError(f"unknown panel: {panel}")
 
     cutoffs = _normalize_cutoffs(ks or [1, 5, 10])
-    truth_by_genome = _ranking_truth(labels, split=split, target_key=target_key, panel=panel)
+    truth_by_genome = _ranking_truth(
+        labels,
+        split=split,
+        target_key=target_key,
+        panel=panel,
+        feature_genomes=set(features.genome_ids),
+    )
     ranked = []
     for genome_id, truth in truth_by_genome.items():
         score = _ranking_score(model, features, genome_id, target_key=target_key, panel=panel)
@@ -331,14 +343,24 @@ def _train_target_model(features: FeatureMatrix, labels: list[LabelRecord]) -> T
     negatives = [record for record in labels if record.value == 0]
     alpha = 1.0
     prior = (len(positives) + alpha) / (len(labels) + 2 * alpha)
+    pos_counts = _feature_counts(features, positives)
+    neg_counts = _feature_counts(features, negatives)
     weights = []
     for feature_index in range(len(features.feature_names)):
-        pos_with = sum(features.row_for(record.genome_id)[feature_index] for record in positives)
-        neg_with = sum(features.row_for(record.genome_id)[feature_index] for record in negatives)
+        pos_with = pos_counts[feature_index]
+        neg_with = neg_counts[feature_index]
         p_feature_pos = (pos_with + alpha) / (len(positives) + 2 * alpha)
         p_feature_neg = (neg_with + alpha) / (len(negatives) + 2 * alpha)
         weights.append(_logit(p_feature_pos) - _logit(p_feature_neg))
     return TargetModel(prior_log_odds=_logit(prior), feature_log_odds=weights)
+
+
+def _feature_counts(features: FeatureMatrix, labels: list[LabelRecord]) -> list[int]:
+    counts = [0] * len(features.feature_names)
+    for record in labels:
+        for feature_index, value in enumerate(features.row_for(record.genome_id)):
+            counts[feature_index] += value
+    return counts
 
 
 def _normalize_cutoffs(ks: list[int]) -> list[int]:
@@ -354,10 +376,13 @@ def _ranking_truth(
     split: str,
     target_key: str | None,
     panel: str | None,
+    feature_genomes: set[str],
 ) -> dict[str, int]:
     truth_by_genome: dict[str, int] = {}
     for record in labels:
         if record.split != split:
+            continue
+        if record.genome_id not in feature_genomes:
             continue
         if target_key is not None and record.target_key != target_key:
             continue
@@ -493,3 +518,11 @@ def _align_row(features: FeatureMatrix, genome_id: str, model_feature_names: lis
 
 def _logit(p: float) -> float:
     return math.log(p / (1 - p))
+
+
+def _sigmoid(logit: float) -> float:
+    if logit >= 0:
+        z = math.exp(-logit)
+        return 1 / (1 + z)
+    z = math.exp(logit)
+    return z / (1 + z)

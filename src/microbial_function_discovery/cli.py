@@ -12,6 +12,11 @@ from microbial_function_discovery.baseline import predict_from_annotation_hits, 
 from microbial_function_discovery.datasets import FamilyLeakageError, parse_labels_tsv, validate_family_holdout
 from microbial_function_discovery.features import FeatureMatrix, build_feature_matrix_from_annotation_tsv
 from microbial_function_discovery.importers import format_annotation_hits_tsv, parse_eggnog_mapper, parse_hmmer_domtblout
+from microbial_function_discovery.legacy_import import (
+    labels_tsv_from_legacy_tables,
+    load_legacy_npz_feature_matrix,
+    load_table_records,
+)
 from microbial_function_discovery.learning import (
     BaselineModel,
     evaluate_model,
@@ -102,6 +107,38 @@ def build_parser() -> argparse.ArgumentParser:
     build_features_parser.add_argument("annotations", type=Path, help="Path to multi-genome annotation TSV.")
     build_features_parser.add_argument("--out", type=Path, required=True, help="Output feature matrix JSON.")
 
+    import_legacy_labels_parser = subparsers.add_parser(
+        "import-legacy-labels",
+        help="Convert microbe-foundation traits/splits tables to benchmark label TSV.",
+    )
+    import_legacy_labels_parser.add_argument("traits", type=Path, help="Legacy traits table, CSV/TSV/parquet.")
+    import_legacy_labels_parser.add_argument("splits", type=Path, help="Legacy splits table, CSV/TSV/parquet.")
+    import_legacy_labels_parser.add_argument("--out", type=Path, required=True, help="Output benchmark labels TSV.")
+    import_legacy_labels_parser.add_argument("--split-column", default="family_split", help="Split column to use.")
+    import_legacy_labels_parser.add_argument(
+        "--max-multilabel-classes",
+        type=int,
+        default=50,
+        help="Maximum observed classes per legacy multilabel trait.",
+    )
+
+    import_legacy_features_parser = subparsers.add_parser(
+        "import-legacy-eggnog-features",
+        help="Convert cached microbe-foundation eggNOG NPZ features to feature matrix JSON.",
+    )
+    import_legacy_features_parser.add_argument("npz", type=Path, help="Legacy eggNOG feature NPZ.")
+    import_legacy_features_parser.add_argument("vocab", type=Path, help="Legacy eggNOG vocabulary JSON.")
+    import_legacy_features_parser.add_argument("--out", type=Path, required=True, help="Output feature matrix JSON.")
+    import_legacy_features_parser.add_argument(
+        "--labels",
+        type=Path,
+        default=None,
+        help="Optional benchmark labels TSV used to restrict genomes.",
+    )
+    import_legacy_features_parser.add_argument("--max-features", type=int, default=1000, help="Top features to keep.")
+    import_legacy_features_parser.add_argument("--min-prevalence", type=int, default=1, help="Minimum feature prevalence.")
+    import_legacy_features_parser.add_argument("--feature-prefix", default="eggNOG", help="Feature namespace prefix.")
+
     train_parser = subparsers.add_parser(
         "train-baseline",
         help="Train a no-GPU baseline model from features and labels.",
@@ -187,6 +224,24 @@ def main(argv: list[str] | None = None) -> int:
         return _validate_splits(args.labels)
     if args.command == "build-features":
         return _build_features(args.annotations, args.out)
+    if args.command == "import-legacy-labels":
+        return _import_legacy_labels(
+            args.traits,
+            args.splits,
+            args.out,
+            args.split_column,
+            args.max_multilabel_classes,
+        )
+    if args.command == "import-legacy-eggnog-features":
+        return _import_legacy_eggnog_features(
+            args.npz,
+            args.vocab,
+            args.out,
+            args.labels,
+            args.max_features,
+            args.min_prevalence,
+            args.feature_prefix,
+        )
     if args.command == "train-baseline":
         return _train_baseline(args.features, args.labels, args.out, args.train_split)
     if args.command == "evaluate":
@@ -368,6 +423,72 @@ def _build_features(annotations_path: Path, out_path: Path) -> int:
         return 1
     except ValueError as exc:
         print(f"{annotations_path}: invalid annotation TSV: {exc}", file=sys.stderr)
+        return 1
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(features.to_json())
+    print(f"wrote {len(features.genome_ids)} genomes x {len(features.feature_names)} features to {out_path}")
+    return 0
+
+
+def _import_legacy_labels(
+    traits_path: Path,
+    splits_path: Path,
+    out_path: Path,
+    split_column: str,
+    max_multilabel_classes: int,
+) -> int:
+    try:
+        trait_rows = load_table_records(traits_path)
+        split_rows = load_table_records(splits_path)
+        labels_text = labels_tsv_from_legacy_tables(
+            trait_rows,
+            split_rows,
+            split_column=split_column,
+            max_multilabel_classes=max_multilabel_classes,
+        )
+        records = parse_labels_tsv(labels_text)
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except (RuntimeError, ValueError) as exc:
+        print(f"cannot import legacy labels: {exc}", file=sys.stderr)
+        return 1
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(labels_text)
+    targets = {record.target_key for record in records}
+    genomes = {record.genome_id for record in records}
+    print(f"wrote {len(records)} labels for {len(genomes)} genomes and {len(targets)} targets to {out_path}")
+    return 0
+
+
+def _import_legacy_eggnog_features(
+    npz_path: Path,
+    vocab_path: Path,
+    out_path: Path,
+    labels_path: Path | None,
+    max_features: int,
+    min_prevalence: int,
+    feature_prefix: str,
+) -> int:
+    try:
+        keep_genome_ids = None
+        if labels_path is not None:
+            keep_genome_ids = {record.genome_id for record in parse_labels_tsv(labels_path.read_text())}
+        features = load_legacy_npz_feature_matrix(
+            npz_path,
+            vocab_path,
+            max_features=max_features,
+            min_prevalence=min_prevalence,
+            feature_prefix=feature_prefix,
+            keep_genome_ids=keep_genome_ids,
+        )
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except (RuntimeError, ValueError, KeyError) as exc:
+        print(f"cannot import legacy eggNOG features: {exc}", file=sys.stderr)
         return 1
 
     out_path.parent.mkdir(parents=True, exist_ok=True)

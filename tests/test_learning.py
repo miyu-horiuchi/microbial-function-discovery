@@ -4,6 +4,8 @@ import unittest
 from microbial_function_discovery.datasets import parse_labels_tsv
 from microbial_function_discovery.features import build_feature_matrix_from_annotation_tsv
 from microbial_function_discovery.learning import (
+    BaselineModel,
+    TargetModel,
     evaluate_model,
     evaluate_ranking,
     predict_model,
@@ -41,12 +43,40 @@ class LearningTests(unittest.TestCase):
             model.predict_proba("biofuels_industrial:cellulose_degradation", "G4", features),
         )
 
+    def test_train_baseline_ignores_labels_without_features(self):
+        features = build_feature_matrix_from_annotation_tsv(ANNOTATIONS_TSV)
+        labels = parse_labels_tsv(
+            LABELS_TSV
+            + "G_missing\ttrain\tFamilyA\tbiofuels_industrial\tcellulose_degradation\t1\n"
+        )
+
+        model = train_baseline(features, labels)
+
+        self.assertIn("biofuels_industrial:cellulose_degradation", model.targets)
+
     def test_model_round_trips_json(self):
         features = build_feature_matrix_from_annotation_tsv(ANNOTATIONS_TSV)
         labels = parse_labels_tsv(LABELS_TSV)
         model = train_baseline(features, labels)
 
         self.assertEqual(model, model.from_json(model.to_json()))
+
+    def test_predict_proba_handles_extreme_logits(self):
+        features = build_feature_matrix_from_annotation_tsv(ANNOTATIONS_TSV)
+        model = BaselineModel(
+            feature_names=features.feature_names,
+            targets={
+                "biofuels_industrial:cellulose_degradation": TargetModel(
+                    prior_log_odds=-1000.0,
+                    feature_log_odds=[0.0 for _feature in features.feature_names],
+                )
+            },
+        )
+
+        self.assertEqual(
+            model.predict_proba("biofuels_industrial:cellulose_degradation", "G1", features),
+            0.0,
+        )
 
     def test_evaluate_model_reports_accuracy(self):
         features = build_feature_matrix_from_annotation_tsv(ANNOTATIONS_TSV)
@@ -59,6 +89,18 @@ class LearningTests(unittest.TestCase):
         self.assertEqual(report["overall"]["n"], 2)
         self.assertEqual(report["overall"]["accuracy"], 1.0)
         json.dumps(report)
+
+    def test_evaluate_model_ignores_labels_without_features(self):
+        features = build_feature_matrix_from_annotation_tsv(ANNOTATIONS_TSV)
+        labels = parse_labels_tsv(
+            LABELS_TSV
+            + "G_missing\ttest\tFamilyB\tbiofuels_industrial\tcellulose_degradation\t1\n"
+        )
+        model = train_baseline(features, labels)
+
+        report = evaluate_model(model, features, labels, split="test")
+
+        self.assertEqual(report["overall"]["n"], 2)
 
     def test_predict_model_returns_valid_prediction_json(self):
         features = build_feature_matrix_from_annotation_tsv(ANNOTATIONS_TSV)

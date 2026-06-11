@@ -141,6 +141,30 @@ mfd rank-candidates outputs/model.json outputs/features.json --target biofuels_i
 mfd validate examples/prediction.example.json
 ```
 
+Reuse the earlier `microbe-foundation` local artifacts with the optional legacy
+dependencies:
+
+```bash
+python3 -m pip install -e ".[legacy]"
+mfd import-legacy-labels \
+  /Users/miyuhoriuchi/microbe-foundation/data/traits.parquet \
+  /Users/miyuhoriuchi/microbe-foundation/data/splits.parquet \
+  --out data/legacy/labels.tsv \
+  --split-column family_split \
+  --max-multilabel-classes 25
+mfd validate-splits data/legacy/labels.tsv
+mfd import-legacy-eggnog-features \
+  /Users/miyuhoriuchi/microbe-foundation/data/eggnog_features_5851.npz \
+  /Users/miyuhoriuchi/microbe-foundation/data/eggnog_vocab.json \
+  --labels data/legacy/labels.tsv \
+  --out data/legacy/features.1000.json \
+  --max-features 1000 \
+  --min-prevalence 5
+mfd train-baseline data/legacy/features.1000.json data/legacy/labels.tsv --out data/legacy/model.1000.json
+mfd evaluate data/legacy/model.1000.json data/legacy/features.1000.json data/legacy/labels.tsv --split test --out data/legacy/eval.test.1000.json
+mfd evaluate-ranking data/legacy/model.1000.json data/legacy/features.1000.json data/legacy/labels.tsv --split test --target biofuels_industrial:temperature_class__thermophile --k 10 --k 50
+```
+
 The current `predict` command is a transparent annotation-keyword baseline. It
 is useful for exercising the product contract now and will be replaced by
 learned genome encoders as benchmark datasets come online.
@@ -211,3 +235,22 @@ Feature input is the normalized multi-genome annotation TSV:
 genome_id	protein_id	database	accession	name	evalue
 G1	p1	CAZy	GH5	glycoside hydrolase family 5 cellulase	1e-40
 ```
+
+## Current Real-Data Baseline
+
+Using local artifacts from the earlier `microbe-foundation` repo, the importer
+currently produces:
+
+- `data/legacy/labels.tsv`: 1,258,841 labels, 60,611 genomes, 114 targets
+- `data/legacy/features.1000.json`: 5,838 genomes x 1,000 eggNOG features
+- `data/legacy/model.1000.json`: 107 trained target models
+
+Initial family-held-out test result:
+
+- overall accuracy: 0.743 across 39,509 evaluated labels
+- thermophile ranking: precision@10 = 0.50, precision@50 = 0.16
+- human pathogenicity ranking: precision@10 = 0.00, precision@50 = 0.16
+
+This is a CPU baseline and a data-integration check, not the final foundation
+model. The next model step is to add cached ESM/per-protein genome embeddings
+and compare them against this eggNOG-only baseline on the same held-out labels.
