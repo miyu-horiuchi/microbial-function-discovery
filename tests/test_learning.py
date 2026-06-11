@@ -3,7 +3,7 @@ import unittest
 
 from microbial_function_discovery.datasets import parse_labels_tsv
 from microbial_function_discovery.features import build_feature_matrix_from_annotation_tsv
-from microbial_function_discovery.learning import evaluate_model, predict_model, train_baseline
+from microbial_function_discovery.learning import evaluate_model, predict_model, rank_candidates, train_baseline
 from microbial_function_discovery.validation import validate_prediction
 
 
@@ -64,6 +64,29 @@ class LearningTests(unittest.TestCase):
         validate_prediction(prediction)
         self.assertEqual(prediction["genome_id"], "G3")
         self.assertEqual(prediction["functions"][0]["name"], "cellulose degradation")
+
+    def test_rank_candidates_by_target(self):
+        features = build_feature_matrix_from_annotation_tsv(ANNOTATIONS_TSV)
+        labels = parse_labels_tsv(LABELS_TSV)
+        model = train_baseline(features, labels)
+
+        ranking = rank_candidates(model, features, target_key="biofuels_industrial:cellulose_degradation")
+
+        self.assertEqual(ranking["mode"], "target")
+        self.assertEqual(ranking["query"], "biofuels_industrial:cellulose_degradation")
+        self.assertEqual(ranking["candidates"][0]["genome_id"], "G1")
+        self.assertGreater(ranking["candidates"][0]["score"], ranking["candidates"][-1]["score"])
+
+    def test_rank_candidates_by_panel(self):
+        features = build_feature_matrix_from_annotation_tsv(ANNOTATIONS_TSV)
+        labels = parse_labels_tsv(LABELS_TSV)
+        model = train_baseline(features, labels)
+
+        ranking = rank_candidates(model, features, panel="biofuels_industrial", limit=2)
+
+        self.assertEqual(ranking["mode"], "panel")
+        self.assertEqual(ranking["query"], "biofuels_industrial")
+        self.assertEqual(len(ranking["candidates"]), 2)
 
 
 if __name__ == "__main__":

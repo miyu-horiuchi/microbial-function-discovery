@@ -292,6 +292,27 @@ class CliTests(unittest.TestCase):
             self.assertEqual(prediction["genome_id"], "G3")
             self.assertIn("functions", prediction)
 
+            ranking_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "microbial_function_discovery.cli",
+                    "rank-candidates",
+                    str(model_path),
+                    str(features_path),
+                    "--target",
+                    "biofuels_industrial:cellulose_degradation",
+                    "--limit",
+                    "2",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            ranking = json.loads(ranking_result.stdout)
+            self.assertEqual(ranking["mode"], "target")
+            self.assertEqual(len(ranking["candidates"]), 2)
+
 
 def _write_fake_executable(path: Path, body: str) -> Path:
     script = "#!/usr/bin/env python3\n" + textwrap.dedent(body).strip() + "\n"

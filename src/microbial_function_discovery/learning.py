@@ -193,6 +193,82 @@ def predict_model(model: BaselineModel, features: FeatureMatrix, *, genome_id: s
     }
 
 
+def rank_candidates(
+    model: BaselineModel,
+    features: FeatureMatrix,
+    *,
+    target_key: str | None = None,
+    panel: str | None = None,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    """Rank candidate genomes by one target or by best score in a panel."""
+
+    if (target_key is None) == (panel is None):
+        raise ValueError("provide exactly one of target_key or panel")
+    if target_key is not None and target_key not in model.targets:
+        raise KeyError(f"target not found in model: {target_key}")
+    if panel is not None and panel not in APPLICATION_AREAS:
+        raise ValueError(f"unknown panel: {panel}")
+
+    candidates = []
+    for genome_id in features.genome_ids:
+        if target_key is not None:
+            score = model.predict_proba(target_key, genome_id, features)
+            panel_key, label = _split_target_key(target_key)
+            evidence = _active_evidence(model, features, genome_id, target_key)
+            target_scores = [
+                {
+                    "target_key": target_key,
+                    "label": label.replace("_", " "),
+                    "score": round(score, 6),
+                }
+            ]
+        else:
+            panel_targets = [key for key in model.targets if key.startswith(f"{panel}:")]
+            if not panel_targets:
+                score = 0.05
+                panel_key = panel or "unknown"
+                evidence = []
+                target_scores = []
+            else:
+                target_rows = [
+                    {
+                        "target_key": key,
+                        "label": _split_target_key(key)[1].replace("_", " "),
+                        "score": model.predict_proba(key, genome_id, features),
+                    }
+                    for key in panel_targets
+                ]
+                best = max(target_rows, key=lambda row: row["score"])
+                score = best["score"]
+                panel_key = panel or "unknown"
+                evidence = _active_evidence(model, features, genome_id, best["target_key"])
+                target_scores = [
+                    {**row, "score": round(row["score"], 6)}
+                    for row in sorted(target_rows, key=lambda row: row["score"], reverse=True)
+                ]
+
+        candidates.append(
+            {
+                "genome_id": genome_id,
+                "score": round(score, 6),
+                "panel": panel_key,
+                "target_scores": target_scores,
+                "evidence": evidence,
+            }
+        )
+
+    ranked = sorted(candidates, key=lambda row: (-row["score"], row["genome_id"]))
+    if limit is not None:
+        ranked = ranked[:limit]
+    return {
+        "mode": "target" if target_key is not None else "panel",
+        "query": target_key if target_key is not None else panel,
+        "n_candidates": len(candidates),
+        "candidates": ranked,
+    }
+
+
 def _train_target_model(features: FeatureMatrix, labels: list[LabelRecord]) -> TargetModel:
     positives = [record for record in labels if record.value == 1]
     negatives = [record for record in labels if record.value == 0]
