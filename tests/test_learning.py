@@ -3,7 +3,8 @@ import unittest
 
 from microbial_function_discovery.datasets import parse_labels_tsv
 from microbial_function_discovery.features import build_feature_matrix_from_annotation_tsv
-from microbial_function_discovery.learning import evaluate_model, train_baseline
+from microbial_function_discovery.learning import evaluate_model, predict_model, train_baseline
+from microbial_function_discovery.validation import validate_prediction
 
 
 ANNOTATIONS_TSV = """genome_id\tprotein_id\tdatabase\taccession\tname\tevalue
@@ -52,6 +53,17 @@ class LearningTests(unittest.TestCase):
         self.assertEqual(report["overall"]["n"], 2)
         self.assertEqual(report["overall"]["accuracy"], 1.0)
         json.dumps(report)
+
+    def test_predict_model_returns_valid_prediction_json(self):
+        features = build_feature_matrix_from_annotation_tsv(ANNOTATIONS_TSV)
+        labels = parse_labels_tsv(LABELS_TSV)
+        model = train_baseline(features, labels)
+
+        prediction = predict_model(model, features, genome_id="G3")
+
+        validate_prediction(prediction)
+        self.assertEqual(prediction["genome_id"], "G3")
+        self.assertEqual(prediction["functions"][0]["name"], "cellulose degradation")
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ from typing import Any
 
 from microbial_function_discovery.datasets import LabelRecord
 from microbial_function_discovery.features import FeatureMatrix
+from microbial_function_discovery.panels import APPLICATION_AREAS
 
 
 @dataclass(frozen=True)
@@ -133,6 +134,65 @@ def evaluate_model(
     }
 
 
+def predict_model(model: BaselineModel, features: FeatureMatrix, *, genome_id: str) -> dict[str, Any]:
+    """Emit product-style prediction JSON from a trained baseline model."""
+
+    scored_targets = []
+    for target_key in sorted(model.targets):
+        panel, label = _split_target_key(target_key)
+        score = model.predict_proba(target_key, genome_id, features)
+        scored_targets.append(
+            {
+                "target_key": target_key,
+                "panel": panel,
+                "label": label,
+                "score": score,
+                "evidence": _active_evidence(model, features, genome_id, target_key),
+            }
+        )
+
+    functions = [
+        {
+            "name": item["label"].replace("_", " "),
+            "score": round(item["score"], 6),
+            "confidence": round(_confidence_from_score(item["score"]), 6),
+            "evidence": item["evidence"],
+        }
+        for item in sorted(scored_targets, key=lambda row: row["score"], reverse=True)
+    ]
+    if not functions:
+        functions = [
+            {
+                "name": "unresolved function",
+                "score": 0.05,
+                "confidence": 0.2,
+                "evidence": [
+                    {
+                        "type": "database_hit",
+                        "id": "no_trained_targets",
+                        "annotation": "No trained target models are available.",
+                        "database": "baseline",
+                        "weight": 0.05,
+                    }
+                ],
+            }
+        ]
+
+    return {
+        "genome_id": genome_id,
+        "application_scores": _application_scores_from_targets(scored_targets),
+        "functions": functions,
+        "biosafety": _biosafety_from_targets(scored_targets),
+        "novelty": {
+            "nearest_training_family": "unknown",
+            "generalization_risk": "unknown",
+            "notes": [
+                "Prediction uses a no-GPU annotation-feature baseline; calibrated taxonomic novelty is not available yet."
+            ],
+        },
+    }
+
+
 def _train_target_model(features: FeatureMatrix, labels: list[LabelRecord]) -> TargetModel:
     positives = [record for record in labels if record.value == 1]
     negatives = [record for record in labels if record.value == 0]
@@ -146,6 +206,109 @@ def _train_target_model(features: FeatureMatrix, labels: list[LabelRecord]) -> T
         p_feature_neg = (neg_with + alpha) / (len(negatives) + 2 * alpha)
         weights.append(_logit(p_feature_pos) - _logit(p_feature_neg))
     return TargetModel(prior_log_odds=_logit(prior), feature_log_odds=weights)
+
+
+def _active_evidence(
+    model: BaselineModel,
+    features: FeatureMatrix,
+    genome_id: str,
+    target_key: str,
+) -> list[dict[str, Any]]:
+    row = _align_row(features, genome_id, model.feature_names)
+    weights = model.targets[target_key].feature_log_odds
+    evidence = []
+    for feature_name, value, weight in sorted(zip(model.feature_names, row, weights), key=lambda item: item[2], reverse=True):
+        if not value or weight <= 0:
+            continue
+        database, accession = _split_feature_name(feature_name)
+        evidence.append(
+            {
+                "type": "database_hit",
+                "id": feature_name,
+                "annotation": f"active feature {feature_name} supports {target_key}",
+                "database": database,
+                "weight": round(min(1.0, weight / 2), 6),
+            }
+        )
+    if evidence:
+        return evidence[:5]
+    return [
+        {
+            "type": "database_hit",
+            "id": "no_positive_active_features",
+            "annotation": f"No positive active annotation features support {target_key}.",
+            "database": "baseline",
+            "weight": 0.05,
+        }
+    ]
+
+
+def _application_scores_from_targets(scored_targets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    scores = []
+    for panel in APPLICATION_AREAS:
+        panel_items = [item for item in scored_targets if item["panel"] == panel]
+        if panel_items:
+            best = max(panel_items, key=lambda item: item["score"])
+            score = best["score"]
+            confidence = _confidence_from_score(score)
+            top_functions = [
+                item["label"].replace("_", " ")
+                for item in sorted(panel_items, key=lambda item: item["score"], reverse=True)[:3]
+            ]
+        else:
+            score = 0.05
+            confidence = 0.2
+            top_functions = []
+        scores.append(
+            {
+                "area": panel,
+                "score": round(score, 6),
+                "confidence": round(confidence, 6),
+                "top_functions": top_functions,
+            }
+        )
+    return scores
+
+
+def _biosafety_from_targets(scored_targets: list[dict[str, Any]]) -> dict[str, Any]:
+    biosafety_items = [item for item in scored_targets if item["panel"] == "biosafety"]
+    pathogenicity_scores = [
+        item["score"]
+        for item in biosafety_items
+        if "pathogen" in item["label"] or "virulence" in item["label"] or "toxin" in item["label"]
+    ]
+    amr_scores = [
+        item["score"]
+        for item in biosafety_items
+        if "amr" in item["label"] or "resistance" in item["label"] or "antimicrobial" in item["label"]
+    ]
+    pathogenicity_risk = max(pathogenicity_scores, default=0.05)
+    amr_risk = max(amr_scores, default=0.05)
+    warnings = []
+    if pathogenicity_risk >= 0.5:
+        warnings.append("Learned baseline predicts elevated pathogenicity or virulence risk.")
+    if amr_risk >= 0.5:
+        warnings.append("Learned baseline predicts elevated antimicrobial resistance risk.")
+    return {
+        "pathogenicity_risk": round(pathogenicity_risk, 6),
+        "amr_risk": round(amr_risk, 6),
+        "warnings": warnings,
+    }
+
+
+def _confidence_from_score(score: float) -> float:
+    return min(0.95, 0.2 + abs(score - 0.5) * 1.5)
+
+
+def _split_target_key(target_key: str) -> tuple[str, str]:
+    panel, label = target_key.split(":", maxsplit=1)
+    return panel, label
+
+
+def _split_feature_name(feature_name: str) -> tuple[str, str]:
+    if ":" not in feature_name:
+        return "annotation", feature_name
+    return feature_name.split(":", maxsplit=1)
 
 
 def _align_row(features: FeatureMatrix, genome_id: str, model_feature_names: list[str]) -> list[int]:

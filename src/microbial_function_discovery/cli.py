@@ -12,7 +12,7 @@ from microbial_function_discovery.baseline import predict_from_annotation_hits, 
 from microbial_function_discovery.datasets import FamilyLeakageError, parse_labels_tsv, validate_family_holdout
 from microbial_function_discovery.features import FeatureMatrix, build_feature_matrix_from_annotation_tsv
 from microbial_function_discovery.importers import format_annotation_hits_tsv, parse_eggnog_mapper, parse_hmmer_domtblout
-from microbial_function_discovery.learning import BaselineModel, evaluate_model, train_baseline
+from microbial_function_discovery.learning import BaselineModel, evaluate_model, predict_model, train_baseline
 from microbial_function_discovery.panels import list_panels
 from microbial_function_discovery.runners import run_eggnog_mapper, run_hmmer_domtblout
 from microbial_function_discovery.validation import PredictionValidationError, validate_prediction
@@ -114,6 +114,14 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate_parser.add_argument("--split", default="test", help="Split to evaluate.")
     evaluate_parser.add_argument("--out", type=Path, default=None, help="Optional output report JSON.")
 
+    predict_baseline_parser = subparsers.add_parser(
+        "predict-baseline",
+        help="Emit product-style prediction JSON from a trained baseline model.",
+    )
+    predict_baseline_parser.add_argument("model", type=Path, help="Path to model JSON.")
+    predict_baseline_parser.add_argument("features", type=Path, help="Path to feature matrix JSON.")
+    predict_baseline_parser.add_argument("--genome-id", required=True, help="Genome id to predict.")
+
     return parser
 
 
@@ -145,6 +153,8 @@ def main(argv: list[str] | None = None) -> int:
         return _train_baseline(args.features, args.labels, args.out, args.train_split)
     if args.command == "evaluate":
         return _evaluate(args.model, args.features, args.labels, args.split, args.out)
+    if args.command == "predict-baseline":
+        return _predict_baseline(args.model, args.features, args.genome_id)
 
     parser.error(f"unknown command: {args.command}")
     return 2
@@ -363,6 +373,23 @@ def _evaluate(model_path: Path, features_path: Path, labels_path: Path, split: s
         print(f"wrote evaluation report to {out_path}")
     else:
         print(text)
+    return 0
+
+
+def _predict_baseline(model_path: Path, features_path: Path, genome_id: str) -> int:
+    try:
+        model = BaselineModel.from_json(model_path.read_text())
+        features = FeatureMatrix.from_json(features_path.read_text())
+        prediction = predict_model(model, features, genome_id=genome_id)
+        validate_prediction(prediction)
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except (ValueError, KeyError, PredictionValidationError) as exc:
+        print(f"cannot predict with baseline: {exc}", file=sys.stderr)
+        return 1
+
+    print(json.dumps(prediction, indent=2, sort_keys=True))
     return 0
 
 

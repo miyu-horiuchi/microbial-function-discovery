@@ -273,6 +273,25 @@ class CliTests(unittest.TestCase):
             report = json.loads(report_path.read_text())
             self.assertEqual(report["overall"]["accuracy"], 1.0)
 
+            prediction_result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "microbial_function_discovery.cli",
+                    "predict-baseline",
+                    str(model_path),
+                    str(features_path),
+                    "--genome-id",
+                    "G3",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            prediction = json.loads(prediction_result.stdout)
+            self.assertEqual(prediction["genome_id"], "G3")
+            self.assertIn("functions", prediction)
+
 
 def _write_fake_executable(path: Path, body: str) -> Path:
     script = "#!/usr/bin/env python3\n" + textwrap.dedent(body).strip() + "\n"
