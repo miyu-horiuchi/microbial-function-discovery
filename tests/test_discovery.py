@@ -141,5 +141,52 @@ class DiscoveryAnnotationTests(unittest.TestCase):
         json.dumps(export)
 
 
+    def test_annotate_attaches_novelty_flag(self):
+        features = build_feature_matrix_from_annotation_tsv(ANNOTATIONS_TSV)
+        labels = parse_labels_tsv(LABELS_TSV)
+        model = train_baseline(features, labels)
+        candidates = {
+            "split": "test",
+            "targets": [
+                {
+                    "target_key": "biofuels_industrial:cellulose_degradation",
+                    "panel": "biofuels_industrial",
+                    "label": "cellulose_degradation",
+                    "source": "annotation",
+                    "metrics": {"precision_at_10": 1.0},
+                    "candidates": [{"genome_id": "G3", "rank": 1, "score": 0.9}],
+                }
+            ],
+        }
+        annotated = annotate_discovery_candidates(candidates, [], [], model, features, labels)
+        cand = annotated["targets"][0]["candidates"][0]
+        self.assertIn("novelty", cand)
+        self.assertIn(cand["novelty"]["level"], {"typical", "novel", "highly_novel", "unknown"})
+        # G3's annotation set equals training genome G1's -> nearest distance 0 -> typical
+        self.assertEqual(cand["novelty"]["level"], "typical")
+
+    def test_annotate_novelty_unknown_for_missing_genome(self):
+        features = build_feature_matrix_from_annotation_tsv(ANNOTATIONS_TSV)
+        labels = parse_labels_tsv(LABELS_TSV)
+        model = train_baseline(features, labels)
+        candidates = {
+            "split": "test",
+            "targets": [
+                {
+                    "target_key": "biofuels_industrial:cellulose_degradation",
+                    "panel": "biofuels_industrial",
+                    "label": "cellulose_degradation",
+                    "source": "annotation",
+                    "metrics": {"precision_at_10": 1.0},
+                    "candidates": [{"genome_id": "NOT_IN_MATRIX", "rank": 1, "score": 0.9}],
+                }
+            ],
+        }
+        annotated = annotate_discovery_candidates(candidates, [], [], model, features, labels)
+        cand = annotated["targets"][0]["candidates"][0]
+        self.assertEqual(cand["novelty"]["level"], "unknown")
+        self.assertIsNone(cand["novelty"]["score"])
+
+
 if __name__ == "__main__":
     unittest.main()

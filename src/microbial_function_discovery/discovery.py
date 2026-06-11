@@ -10,6 +10,7 @@ from typing import Any
 from microbial_function_discovery.datasets import LabelRecord
 from microbial_function_discovery.features import FeatureMatrix
 from microbial_function_discovery.learning import BaselineModel
+from microbial_function_discovery.novelty import AnnotationNoveltyReference
 
 
 TAXONOMY_FIELDS = ["domain", "phylum", "class", "order", "family", "genus", "species", "type_strain"]
@@ -54,6 +55,8 @@ def annotate_discovery_candidates(
         for row in accession_rows
         if _id(row.get("bacdive_id"))
     }
+    novelty_ref = _build_novelty_reference(labels, annotation_features)
+    present_ids = set(annotation_features.genome_ids)
     annotated_targets = []
     for target in candidate_report.get("targets", []):
         target_key = str(target.get("target_key", ""))
@@ -74,6 +77,7 @@ def annotate_discovery_candidates(
                         annotation_model,
                         annotation_features,
                     ),
+                    "novelty": _novelty(genome_id, novelty_ref, present_ids, annotation_features),
                     "evidence": _candidate_evidence(
                         genome_id,
                         target_key,
@@ -423,6 +427,28 @@ def _candidate_evidence(
             }
         )
     return evidence[: max(limit, 1)]
+
+
+def _build_novelty_reference(labels: list[LabelRecord], features: FeatureMatrix):
+    """Reference = split=="train" labeled genomes (fall back to all labels)."""
+    train_ids = [rec.genome_id for rec in labels if getattr(rec, "split", "") == "train"]
+    if not train_ids:
+        train_ids = [rec.genome_id for rec in labels]
+    try:
+        return AnnotationNoveltyReference().fit(features, train_ids)
+    except ValueError:
+        return None
+
+
+def _novelty(genome_id: str, novelty_ref, present_ids: set, features: FeatureMatrix) -> dict[str, Any]:
+    if novelty_ref is None or genome_id not in present_ids:
+        return {"score": None, "level": "unknown", "ref_percentile": None}
+    score = novelty_ref.score(features.row_for(genome_id))
+    return {
+        "score": round(score, 6),
+        "level": novelty_ref.level(score),
+        "ref_percentile": round(novelty_ref.ref_percentile(score), 6),
+    }
 
 
 def _lead_row(target: dict[str, Any], candidate: dict[str, Any], target_precision: float) -> dict[str, Any]:
