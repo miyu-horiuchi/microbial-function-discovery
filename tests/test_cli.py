@@ -1,6 +1,7 @@
 import subprocess
 import sys
 import unittest
+import json
 
 
 class CliTests(unittest.TestCase):
@@ -30,6 +31,26 @@ class CliTests(unittest.TestCase):
         )
 
         self.assertIn("valid", result.stdout)
+
+    def test_predict_command_emits_prediction_json(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "microbial_function_discovery.cli",
+                "predict",
+                "examples/useful_functions.faa",
+                "--genome-id",
+                "candidate_001",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        prediction = json.loads(result.stdout)
+        self.assertEqual(prediction["genome_id"], "candidate_001")
+        self.assertIn("application_scores", prediction)
 
 
 if __name__ == "__main__":
